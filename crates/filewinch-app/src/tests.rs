@@ -465,9 +465,18 @@ fn files_at_once_control_shows_for_multi_file_jobs_only() {
     rt.frame(0.1);
     let tree = rt.accessibility_json().to_string();
     // Counting (3) and known totals (6): both have it; the single large file doesn't.
-    assert!(tree.contains("Files at a time, 3"), "counting job");
-    assert!(tree.contains("Files at a time, 6"), "running job");
-    assert_eq!(tree.matches("Files at a time").count(), 2, "not on the single-file job");
+    let shown = rt.elements().into_iter().filter(|e| !e.exiting && e.key.as_deref() == Some("files-at-once")).count();
+    assert_eq!(shown, 2, "on the counting and running jobs, not the single-file job");
+    if rune::popup_menu_supported() {
+        // A menu button named with its value.
+        assert!(tree.contains("Files at a time, 3"), "counting job");
+        assert!(tree.contains("Files at a time, 6"), "running job");
+    } else {
+        // − and + around a spin button whose value is the count (Linux).
+        assert_eq!(tree.matches("More files at a time").count(), 2, "{tree}");
+        let counts: Vec<String> = rt.elements().into_iter().filter(|e| !e.exiting).filter_map(|e| e.text).filter(|t| t.ends_with("at a time")).collect();
+        assert!(counts.iter().any(|t| t.starts_with('3')) && counts.iter().any(|t| t.starts_with('6')), "{counts:?}");
+    }
 }
 
 #[test]

@@ -37,6 +37,18 @@ The first public release.
   and retry; automatic retries with backoff that resume partial files where both sides allow
   it; conflict handling (ask, overwrite, skip, keep both, resume, overwrite if newer, apply to
   all); one bandwidth limit for all transfers; live speed and time remaining.
+- **Faster downloads over several connections:** a large file is fetched in parallel pieces
+  (Settings, Connections per download: 1–16, default 3) over SFTP, WebDAV, S3, B2, Azure, Swift,
+  cloud drives, and FTP servers that support resuming; servers that refuse fall back to one.
+- **Files at a time, per job:** a folder job moves 3 files at once by default, changeable while
+  it runs, and starts downloading while it is still counting.
+- **Per-file progress:** each job lists its files downloading now, queued, done and skipped;
+  skip one without cancelling the rest.
+- **Inspector** (⌥⌘I / Ctrl+Alt+I): details, preview and permissions for the selection, with
+  SUID, SGID and sticky bits, octal and symbolic forms, Apply, and Apply to Enclosed.
+- **Saved Servers** at the top of the Connect sheet, with a filter and Edit.
+- **External drives, network shares and disk images** in each pane's location menu, and panes
+  that refresh as files arrive.
 - **Folder sync:** compare two folders by size and date, size only, or checksum; copy one way
   or mirror; optionally delete extra items; exclude patterns; review the plan item by item
   before anything changes. Comparing can be cancelled and shows its progress.

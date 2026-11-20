@@ -109,7 +109,12 @@ impl Drop for Azurite {
 
 fn kill_group(child: &mut Child) {
     #[cfg(unix)]
-    let _ = Command::new("kill").args(["-KILL", &format!("-{}", child.id())]).status();
+    // `--` makes `-<pgid>` a process group, never an option: procps-ng `kill` on Linux misread
+    // `kill -KILL -<pgid>` and signalled every process of the user, taking the CI runner down.
+    // The guard keeps a bad id from ever becoming `-1` or `-0`.
+    if child.id() > 1 {
+        let _ = Command::new("kill").args(["-s", "KILL", "--", &format!("-{}", child.id())]).status();
+    }
     let _ = child.kill();
     let _ = child.wait();
 }
