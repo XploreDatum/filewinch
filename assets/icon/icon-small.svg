@@ -1,19 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <!-- Filewinch app icon, simplified variant for 16 and 32 px (16@2x, 32@1x).
-       Same motif as icon.svg (winch drum, cable paying out into a down arrow) with one bold wrap,
-       no shadows, and edges on the 16 px grid (64 units = 1 px). -->
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#3fb6a8"/>
-      <stop offset="1" stop-color="#0d7f78"/>
-    </linearGradient>
-  </defs>
-  <rect x="64" y="64" width="896" height="896" rx="200" fill="url(#bg)"/>
-  <!-- drum: dark barrel, one thick white wrap -->
-  <circle cx="448" cy="416" r="208" fill="#074b47" stroke="#ffffff" stroke-width="96"/>
-  <!-- axle -->
-  <circle cx="448" cy="416" r="64" fill="#ffffff"/>
-  <!-- free cable and arrow head -->
-  <rect x="608" y="416" width="96" height="256" fill="#ffffff"/>
-  <path d="M448 640 H864 L656 896 Z" fill="#ffffff"/>
+       Same motif and colours as icon.svg (charcoal hook cradling a coral folder on a cream tile),
+       redrawn for small sizes: a bigger tile, the hook as one even 2 px stroke with a 2 px eye hole,
+       a one-colour folder without its tab, no shadow, and edges on the 16 px grid (64 units = 1 px).
+       A faint charcoal hairline inside the tile keeps the cream tile visible on light backgrounds. -->
+  <rect x="64" y="64" width="896" height="896" rx="200" fill="#f3ece4"/>
+  <rect x="72" y="72" width="880" height="880" rx="192" fill="none" stroke="#2b2f36" stroke-opacity="0.16" stroke-width="16"/>
+  <!-- hook: eye, then shank, bowl and point as one round-capped stroke -->
+  <circle cx="512" cy="256" r="176" fill="#2b2f36"/>
+  <path d="M512 416 C512 512 320 560 320 688 C320 806 416 864 528 864 C656 864 768 784 768 640 V544"
+        fill="none" stroke="#2b2f36" stroke-width="128" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="512" cy="256" r="64" fill="#f3ece4"/>
+  <!-- folder, cradled in the bowl -->
+  <rect x="448" y="576" width="192" height="208" rx="26" fill="#f07a5a"/>
 </svg>

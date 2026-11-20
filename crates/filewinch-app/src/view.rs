@@ -22,7 +22,7 @@ fn toolbar(s: &Ui, k: &Kit, paint: &Paint, inset: f32) -> El {
     let connect = Button::new("Connect").icon(&icons::PLUS).variant(ButtonVariant::Neutral).control_size(ControlSize::Small).shortcut(crate::keys::Act::Connect.label())
         .on_press(|s: &mut Ui| s.open_connect()).build(k).key("tb-connect");
     let summary = s.transfers.summary();
-    let mut centre = row().gap(8.0).center_y().child(icon(&icons::WINCH, 16.0).color(paint.accent).a11y_hidden())
+    let mut centre = row().gap(8.0).center_y().child(icon(&icons::HOOK, 16.0).color(paint.accent).a11y_hidden())
         .child(text("Filewinch").font(k.ty.text_small_medium).color(k.c.text_base));
     if let Some(sum) = summary {
         centre = centre.child(text(format!("· {sum}")).key("tb-summary").font(k.ty.text_xsmall).color(k.c.text_muted));

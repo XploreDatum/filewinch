@@ -6,7 +6,7 @@ mod notices;
 #[cfg(test)]
 mod tests;
 
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use std::sync::atomic::AtomicU64;
 
 use filewinch_license::Status;
@@ -23,6 +23,10 @@ pub const SOURCE_URL: &str = "https://github.com/XploreDatum/filewinch";
 pub const AGPL_URL: &str = "https://www.gnu.org/licenses/agpl-3.0.html";
 pub const COPYRIGHT: &str = "Copyright © 2026 XploreDatum Technologies LLP";
 pub const LICENSED: &str = "Licensed under the GNU AGPL v3 or later.";
+/// The app icon's master (`assets/icon/icon.svg`). Its tile fills 824 of its 1024 units, so at
+/// `APP_ICON_PT` the tile shows 72 pt wide, with the rest left for the tile's drop shadow.
+const APP_ICON: &[u8] = include_bytes!("../../../../assets/icon/icon.svg");
+const APP_ICON_PT: f32 = 90.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Page {
@@ -120,10 +124,28 @@ fn link(s: &mut AboutUi, tx: &mut Tx, url: &str) {
     s.error = tx.open_url(url).err().map(|e| format!("Filewinch couldn't open your browser ({e}). The address is {url}"));
 }
 
-fn about_page(s: &AboutUi, k: &Kit) -> El {
+/// The app icon at `scale` device pixels per point, rasterized on the spot (so the first frame
+/// and headless snapshots have it) and kept until the window moves to a display of another scale.
+fn app_icon(scale: f32) -> Option<rune::Pixels> {
+    static CACHE: Mutex<Option<(u32, rune::Pixels)>> = Mutex::new(None);
+    let px = (APP_ICON_PT * scale).round().max(1.0) as u32;
+    let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((_, pixels)) = cache.as_ref().filter(|(size, _)| *size == px) {
+        return Some(pixels.clone());
+    }
+    let rgba = rune::image::svg_rgba_cover(APP_ICON, px).ok()?;
+    let pixels = rune::Pixels::new();
+    pixels.set(px, px, rgba);
+    *cache = Some((px, pixels.clone()));
+    Some(pixels)
+}
+
+fn about_page(s: &AboutUi, k: &Kit, scale: f32) -> El {
     let paint = theme::paint(k);
-    let tile = rune::el().w(72.0).h(72.0).radius(16.0).fill(paint.accent).center()
-        .child(icon(&icons::WINCH, 44.0).color(rune::Color::WHITE).a11y_hidden());
+    let mut tile = rune::el().key("about-icon").w(APP_ICON_PT).h(APP_ICON_PT);
+    if let Some(pixels) = app_icon(scale) {
+        tile = tile.pixels(&pixels);
+    }
     let status_color = if s.license.is_registered() { k.c.text_base } else { k.c.text_muted };
     let buttons = row().gap(8.0).center_y()
         .child(Button::new("Source Code").variant(ButtonVariant::Neutral).control_size(ControlSize::Small)
@@ -132,8 +154,8 @@ fn about_page(s: &AboutUi, k: &Kit) -> El {
             .on_press_tx(|s: &mut AboutUi, tx: &mut Tx| link(s, tx, AGPL_URL)).build(k).key("about-agpl"))
         .child(Button::new("Third-Party Notices").variant(ButtonVariant::Neutral).control_size(ControlSize::Small)
             .on_press(|s: &mut AboutUi| s.page = Page::Notices).build(k).key("about-notices"));
-    let mut c = col().key("about").w_full().gap(6.0).px(24.0).pt(44.0).pb(24.0).items_center()
-        .child(tile.mb(10.0))
+    let mut c = col().key("about").w_full().gap(6.0).px(24.0).pt(35.0).pb(24.0).items_center()
+        .child(tile.mb(1.0))
         .child(text("Filewinch").key("about-name").font(k.ty.ui_medium).color(k.c.text_strong).role("heading").level(1))
         .child(text(format!("Version {}", env!("CARGO_PKG_VERSION"))).key("about-version").font(k.ty.text_small).color(k.c.text_muted).selectable(true))
         .child(text(crate::license_ui::status_line(&s.license)).key("about-status").font(k.ty.text_small_medium).color(status_color).mt(8.0))
@@ -182,7 +204,7 @@ pub fn view(s: &AboutUi, cx: &mut Cx<AboutUi>) -> El {
     theme::follow(cx, dark);
     let k = &*theme::kit(dark);
     let body = match s.page {
-        Page::About => about_page(s, k),
+        Page::About => about_page(s, k, cx.env().scale),
         Page::Notices => notices_page(s, k),
     };
     let page = col().key("about-page").w_full().h_full().fill(k.c.bg_base)

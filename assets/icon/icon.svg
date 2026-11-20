@@ -1,35 +1,51 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <!-- Filewinch app icon (master). Original artwork: a winch drum seen end-on, cable wound on it,
-       the outer wrap paying out into a down arrow. Colours: Filewinch teal accent #3fb6a8 / #0d7f78. -->
+  <!-- Filewinch app icon (master). Artwork (from assets/logo-concepts/hitch-combos/hitch-03.svg,
+       "Charcoal Coral"): a flat charcoal lifting hook with a round eye, cradling a coral file folder,
+       on a cream tile. Colours: tile #f3ece4, hook #2b2f36, folder front #f07a5a, tab/back #d4603f.
+       The artwork is flat; only the tile carries the macOS drop shadow and edge highlight. -->
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#3fb6a8"/>
-      <stop offset="1" stop-color="#0d7f78"/>
-    </linearGradient>
-    <linearGradient id="drum" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#0b6a64"/>
-      <stop offset="1" stop-color="#074b47"/>
-    </linearGradient>
     <filter id="shadow" x="-10%" y="-10%" width="120%" height="125%">
       <feDropShadow dx="0" dy="14" stdDeviation="14" flood-color="#000" flood-opacity="0.28"/>
     </filter>
-    <filter id="soft" x="-15%" y="-15%" width="130%" height="135%">
-      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#03302d" flood-opacity="0.40"/>
-    </filter>
   </defs>
   <!-- squircle tile on the macOS 824 px grid -->
-  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)" filter="url(#shadow)"/>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="#f3ece4" filter="url(#shadow)"/>
   <rect x="102" y="102" width="820" height="820" rx="183" fill="none" stroke="#ffffff" stroke-opacity="0.18" stroke-width="4"/>
-  <!-- drum: dark barrel inside a white flange -->
-  <circle cx="474" cy="420" r="260" fill="url(#drum)" stroke="#ffffff" stroke-width="18" filter="url(#soft)"/>
-  <g filter="url(#soft)" fill="#ffffff">
-    <!-- wound cable: inner wrap, and the outer wrap that leaves the drum as the free cable -->
-    <circle cx="474" cy="420" r="122" fill="none" stroke="#ffffff" stroke-width="42"/>
-    <path d="M666 420 A192 192 0 1 0 474 612 M666 420 L666 720" fill="none" stroke="#ffffff" stroke-width="42" stroke-linecap="butt"/>
-    <path d="M474 612 A192 192 0 0 0 666 420" fill="none" stroke="#ffffff" stroke-width="42"/>
-    <!-- arrow head -->
-    <path d="M544 710 H788 L666 846 Z" stroke="#ffffff" stroke-width="30" stroke-linejoin="round"/>
-    <!-- axle -->
-    <circle cx="474" cy="420" r="40"/>
-  </g>
+  <!-- hook: one continuous silhouette with the circular eye cut out -->
+  <path fill="#2b2f36" fill-rule="evenodd" d="
+    M 500 164
+    A 145 145 0 0 1 645 309
+    C 645 371 613 414 564 442
+    C 515 470 475 519 443 568
+    C 421 601 410 626 414 658
+    C 421 718 466 750 524 750
+    C 586 750 633 723 655 678
+    C 673 642 674 598 683 563
+    C 689 541 703 528 722 528
+    C 743 528 756 545 764 575
+    C 778 622 784 671 772 718
+    C 747 819 654 887 535 887
+    C 418 887 323 842 278 765
+    C 241 703 236 644 254 587
+    C 271 533 309 490 343 454
+    C 369 427 387.93 404.88 374.43 381.5
+    A 145 145 0 0 1 500 164 Z
+    M 562 309
+    A 62 62 0 1 0 438 309
+    A 62 62 0 1 0 562 309 Z"/>
+  <!-- folder: darker tab and back, then one solid front face -->
+  <path fill="#d4603f" d="
+    M 462 556 H 505
+    Q 517 556 525 566 L 534 577
+    Q 539 583 550 583 H 601
+    Q 627 583 627 609 V 716
+    Q 627 742 601 742 H 464
+    Q 438 742 438 716 V 580
+    Q 438 556 462 556 Z"/>
+  <path fill="#f07a5a" d="
+    M 464 600 H 601
+    Q 627 600 627 626 V 724
+    Q 627 752 599 752 H 466
+    Q 438 752 438 724 V 626
+    Q 438 600 464 600 Z"/>
 </svg>

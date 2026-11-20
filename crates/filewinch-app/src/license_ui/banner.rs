@@ -30,7 +30,7 @@ pub fn view(s: &Ui, k: &Kit, paint: &Paint) -> Option<El> {
         row().key("license-banner").role("region").label("Licence").w_full().h(HEIGHT).px(12.0).gap(10.0).center_y()
             .fill(k.alpha(paint.accent, if paint.dark { 0.10 } else { 0.06 }))
             .border_sides([1.0, 0.0, 0.0, 0.0], paint.hair)
-            .child(icon(&icons::WINCH, 14.0).color(paint.accent).a11y_hidden())
+            .child(icon(&icons::HOOK, 14.0).color(paint.accent).a11y_hidden())
             .child(text(message()).key("banner-text").font(k.ty.text_small).color(k.c.text_base).grow(1.0).min_w(0.0).truncate())
             .child(enter)
             .child(buy),
