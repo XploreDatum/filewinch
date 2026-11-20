@@ -1,0 +1,17 @@
+[package]
+name = "filewinch-license"
+description = "Filewinch's optional paid licence: activation, daily validation and deactivation against Polar's public customer-portal licence-key API, with the key in the system's secret store."
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+filewinch-core = { workspace = true }
+filewinch-http = { path = "../filewinch-http" }
+filewinch-store = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+# Only for gethostname(3), to label an activation "Filewinch on <host>".
+libc = "0.2"

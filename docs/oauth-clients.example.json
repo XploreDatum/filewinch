@@ -1,0 +1,16 @@
+{
+  "google": {
+    "client_id": "1234567890-abcdefg.apps.googleusercontent.com",
+    "client_secret": "GOCSPX-replace-me"
+  },
+  "dropbox": {
+    "client_id": "replace-with-dropbox-app-key"
+  },
+  "onedrive": {
+    "client_id": "00000000-0000-0000-0000-000000000000"
+  },
+  "box": {
+    "client_id": "replace-with-box-client-id",
+    "client_secret": "replace-with-box-client-secret"
+  }
+}

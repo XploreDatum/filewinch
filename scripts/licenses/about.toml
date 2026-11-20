@@ -1,0 +1,37 @@
+# cargo-about config for THIRD-PARTY-NOTICES.md (run scripts/licenses.sh).
+# Only licences Filewinch (AGPL-3.0-or-later) may combine with are accepted; a dependency under
+# anything else (proprietary, GPL-2.0-only, SSPL, ...) makes the script fail.
+accepted = [
+    "MIT",
+    "MIT-0",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "0BSD",
+    "ISC",
+    "Zlib",
+    "BSL-1.0",
+    "CC0-1.0",
+    "Unlicense",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "MPL-2.0",
+    "CDLA-Permissive-2.0",
+    "LGPL-2.1-or-later",
+    "LGPL-3.0-or-later",
+    "GPL-3.0-or-later",
+    "AGPL-3.0-or-later",
+]
+# Every platform Filewinch ships on.
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+    "aarch64-pc-windows-msvc",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+]
+# Dev and build dependencies aren't in what ships.
+ignore-dev-dependencies = true
+ignore-build-dependencies = true

@@ -1,0 +1,24 @@
+[package]
+name = "filewinch-s3"
+description = "Filewinch's object-store backends: Amazon S3 and S3-compatible endpoints (SigV4), and Backblaze B2's native API."
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+filewinch-core = { workspace = true }
+filewinch-http = { path = "../filewinch-http" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+hmac = "0.13"
+sha2 = "0.11"
+sha1 = "0.11"
+hex = "0.4"
+base64 = "0.22"
+percent-encoding = "2"
+quick-xml = "0.41"
+httpdate = "1"
+
+[dev-dependencies]
+filewinch-testkit = { path = "../filewinch-testkit" }
+md5 = "0.8"

@@ -1,0 +1,27 @@
+target/
+vendor/
+.DS_Store
+dist/
+.build-app.log
+.fetch-app.log
+.test-app.log
+
+# secrets
+.env
+.env.*
+
+# Per-machine Cargo settings (e.g. a target-dir on an external drive); see docs/RELEASING.md
+.cargo/config.toml
+
+# Local-only: kept on this machine, never published
+docs/BRIEF.md
+docs/core-requests.md
+docs/rune-issues/
+docs/release-audit.md
+docs/polar.md
+docs/screens/
+scripts/watchdog.sh
+scripts/dns-cache-proxy.py
+scripts/polar-setup.py
+site/_review/
+.cargo-about-install.log

@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+Disallow: /filewinch/thanks.html
+
+Sitemap: https://xploredatum.github.io/filewinch/sitemap.xml

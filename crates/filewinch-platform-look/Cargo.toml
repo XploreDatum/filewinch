@@ -1,0 +1,20 @@
+[package]
+name = "filewinch-platform-look"
+description = "Reads the desktop's accent colour on Windows (UISettings, DWM) and Linux (XDG portal), off the UI thread."
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+# No UI framework here, so each platform's reader can be checked on any host:
+#   cargo check -p filewinch-platform-look --target x86_64-pc-windows-msvc
+#   cargo check -p filewinch-platform-look --target x86_64-unknown-linux-gnu
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.62", features = ["Foundation", "UI_ViewManagement", "Win32_Foundation", "Win32_System_Registry"] }
+
+# The same zbus major and runtime (async-io) Rune's own portal readers use, so Linux builds carry
+# one D-Bus stack (Rune's crates/rune/Cargo.toml).
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = { version = "5.19", default-features = false, features = ["async-io"] }
+async-io = "2"
+futures-lite = { version = "2", default-features = false, features = ["std"] }

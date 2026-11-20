@@ -1,0 +1,22 @@
+Filewinch
+Copyright © 2026 XploreDatum Technologies LLP
+
+Filewinch is free software: you can redistribute it and/or modify it under the terms of the
+GNU Affero General Public License as published by the Free Software Foundation, either
+version 3 of the License, or (at your option) any later version (SPDX: AGPL-3.0-or-later).
+The full text is in LICENSE.
+
+Filewinch is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+See the GNU Affero General Public License for more details.
+
+Source code: https://github.com/XploreDatum/filewinch
+
+Filewinch is free to use, with every feature, without registering. An optional paid licence
+(US$14, one time) supports its development and removes the "free to use" banner; it changes
+nothing else. Licences are sold through Polar (polar.sh) as merchant of record.
+
+Third-party components and their licences are listed in THIRD-PARTY-NOTICES.md, which is
+also shown in the app under About Filewinch.
+
+The Rune UI framework (vendor/rune) is MIT-licensed; it and its dependencies are listed there too.

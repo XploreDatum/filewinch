@@ -1,0 +1,25 @@
+[package]
+name = "filewinch-store"
+description = "Filewinch's saved sites, recents and preferences (JSON) with secrets in the system's secret store (macOS Keychain, Windows Credential Manager, Secret Service on Linux)."
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+filewinch-core = { workspace = true }
+filewinch-os = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# One secrets API, each OS's native store underneath.
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
+# Only to read the OSStatus inside keyring's errors (user cancelled, access denied).
+security-framework = "3"
+[target.'cfg(windows)'.dependencies]
+keyring = { version = "3", features = ["windows-native"] }
+[target.'cfg(not(any(target_os = "macos", windows)))'.dependencies]
+# Secret Service over pure-Rust zbus (no C libdbus): GNOME Keyring, KWallet.
+keyring = { version = "3", features = ["async-secret-service", "tokio", "crypto-rust"] }
+# Only to read the Secret Service error inside keyring's errors (no service, locked, dismissed).
+secret-service = { version = "4", default-features = false }

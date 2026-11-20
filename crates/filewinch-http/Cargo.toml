@@ -1,0 +1,20 @@
+[package]
+name = "filewinch-http"
+description = "Shared HTTP plumbing for Filewinch's HTTP backends: ureq agent, TLS trust pinning, error mapping, streaming uploads."
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+filewinch-core = { workspace = true }
+# Pinned exactly: this crate uses ureq's `unversioned` transport API, which may change in minor releases.
+ureq = { version = "=3.5.2", default-features = false, features = ["rustls-no-provider"] }
+# Same version ureq 3.5.2 uses; only for matching `ureq::Error::Protocol` variants.
+ureq-proto = { version = "=0.7.1", default-features = false }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-platform-verifier = "0.7"
+ring = "0.17"
+httpdate = "1"
+
+[dev-dependencies]
+rcgen = { version = "0.13", default-features = false, features = ["crypto", "ring"] }

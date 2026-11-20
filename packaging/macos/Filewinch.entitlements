@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Filewinch is signed with the hardened runtime and deliberately has NO entitlements.
+     Each one considered, and why it isn't needed:
+     - com.apple.security.app-sandbox / network.client / network.server: the app isn't sandboxed
+       (Developer ID, outside the Mac App Store), so sandbox network entitlements don't apply;
+       outbound SFTP/FTP/HTTPS and the OAuth loopback redirect work without them.
+     - cs.allow-jit / cs.allow-unsigned-executable-memory: no JIT. Rune's Metal shaders are
+       precompiled metallibs, and WGSL is translated to MSL and compiled by Metal, not by the app.
+     - cs.disable-library-validation: no plug-ins or third-party dylibs; the binary is static Rust
+       linked only against system frameworks.
+     - cs.allow-dyld-environment-variables: not used.
+     - automation.apple-events: no AppleScript/Apple Events (Reveal in Finder runs `/usr/bin/open -R`).
+     - device.camera / device.audio-input: not used.
+     - Keychain: a non-sandboxed Developer ID app reads and writes its own login-keychain items
+       (service app.xpdt.filewinch) without keychain-access-groups.
+     Add an entitlement here only with a reason next to it. -->
+<plist version="1.0">
+<dict/>
+</plist>

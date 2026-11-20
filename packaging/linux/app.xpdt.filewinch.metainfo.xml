@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- AppStream metadata: what software centres (GNOME Software, KDE Discover) show for Filewinch.
+     Installed as share/metainfo/app.xpdt.filewinch.metainfo.xml. -->
+<component type="desktop-application">
+  <id>app.xpdt.filewinch</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>AGPL-3.0-or-later</project_license>
+  <name>Filewinch</name>
+  <summary>Two-pane file transfer for servers and cloud storage</summary>
+  <developer id="app.xpdt">
+    <name>xpdt</name>
+  </developer>
+  <description>
+    <p>
+      Filewinch moves files between your computer and remote storage in a two-pane browser:
+      local folders on one side, a server or cloud drive on the other.
+    </p>
+    <ul>
+      <li>SFTP, FTP and FTPS, WebDAV, Amazon S3 and compatible services, Azure Blob Storage and OpenStack Swift</li>
+      <li>Google Drive, Dropbox, OneDrive and Box</li>
+      <li>A transfer queue with pause, resume, retry and conflict handling</li>
+      <li>Folder sync that compares both sides before changing anything</li>
+      <li>Saved sites, with passwords kept in the system secret store</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">app.xpdt.filewinch.desktop</launchable>
+  <provides>
+    <binary>filewinch</binary>
+  </provides>
+  <categories>
+    <category>Network</category>
+    <category>FileTransfer</category>
+    <category>Utility</category>
+  </categories>
+  <keywords>
+    <keyword>sftp</keyword>
+    <keyword>ftp</keyword>
+    <keyword>webdav</keyword>
+    <keyword>s3</keyword>
+    <keyword>sync</keyword>
+    <keyword>upload</keyword>
+  </keywords>
+  <requires>
+    <display_length compare="ge">768</display_length>
+  </requires>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+  <content_rating type="oars-1.1"/>
+  <url type="homepage">https://github.com/XploreDatum/filewinch</url>
+  <url type="bugtracker">https://github.com/XploreDatum/filewinch/issues</url>
+  <!-- Newest first; add one per release (CHANGELOG.md has the details). -->
+  <releases>
+    <release version="0.9.0" date="2026-11-20" type="stable">
+      <url type="details">https://github.com/XploreDatum/filewinch/releases/tag/v0.9.0</url>
+      <description>
+        <p>The first public release.</p>
+      </description>
+    </release>
+  </releases>
+</component>

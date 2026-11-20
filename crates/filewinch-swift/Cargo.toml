@@ -1,0 +1,19 @@
+[package]
+name = "filewinch-swift"
+description = "Filewinch's OpenStack Swift and Rackspace Cloud Files backend (Keystone v3/v2, TempAuth, Static Large Objects)."
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+filewinch-core = { workspace = true }
+filewinch-http = { path = "../filewinch-http" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+percent-encoding = "2"
+httpdate = "1"
+md5 = "0.8"
+
+[dev-dependencies]
+filewinch-testkit = { path = "../filewinch-testkit" }
+tiny_http = "0.12"

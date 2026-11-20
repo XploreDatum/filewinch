@@ -1,0 +1,21 @@
+[package]
+name = "filewinch-azure"
+description = "Filewinch's Microsoft Azure Blob Storage backend (Shared Key and SAS)."
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+filewinch-core = { workspace = true }
+filewinch-http = { path = "../filewinch-http" }
+base64 = "0.22"
+hmac = "0.13"
+sha2 = "0.11"
+httpdate = "1"
+percent-encoding = "2"
+roxmltree = "0.20"
+
+[dev-dependencies]
+filewinch-testkit = { path = "../filewinch-testkit" }
+md5 = "0.8"
+tiny_http = "0.12"

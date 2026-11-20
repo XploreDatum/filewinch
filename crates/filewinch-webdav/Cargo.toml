@@ -1,0 +1,20 @@
+[package]
+name = "filewinch-webdav"
+description = "WebDAV and WebDAV-over-HTTPS backend for Filewinch."
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+filewinch-core = { workspace = true }
+filewinch-http = { path = "../filewinch-http" }
+quick-xml = "0.41"
+percent-encoding = "2.3"
+httpdate = "1"
+md5 = "0.8"
+sha2 = "0.10"
+base64 = "0.22"
+getrandom = "0.3"
+
+[dev-dependencies]
+filewinch-testkit = { path = "../filewinch-testkit" }

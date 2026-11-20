@@ -1,0 +1,54 @@
+[package]
+name = "filewinch-app"
+description = "Filewinch: a native two-pane file transfer app for macOS."
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+# Embeds the icon, version info and manifest on Windows; a no-op elsewhere.
+build = "build.rs"
+
+[[bin]]
+name = "filewinch"
+path = "src/main.rs"
+
+[features]
+default = ["sftp", "ftp", "webdav", "s3", "azure", "swift", "cloud"]
+# One feature per backend crate; `registry.rs` lists their connectors.
+sftp = ["dep:filewinch-sftp"]
+ftp = ["dep:filewinch-ftp"]
+webdav = ["dep:filewinch-webdav"]
+s3 = ["dep:filewinch-s3"]
+azure = ["dep:filewinch-azure"]
+swift = ["dep:filewinch-swift"]
+cloud = ["dep:filewinch-cloud"]
+
+[dependencies]
+filewinch-core = { workspace = true }
+filewinch-os = { workspace = true }
+filewinch-engine = { path = "../filewinch-engine" }
+filewinch-local = { workspace = true }
+filewinch-store = { workspace = true }
+filewinch-license = { path = "../filewinch-license" }
+filewinch-platform-look = { path = "../filewinch-platform-look" }
+filewinch-sftp = { path = "../filewinch-sftp", optional = true }
+filewinch-ftp = { path = "../filewinch-ftp", optional = true }
+filewinch-webdav = { path = "../filewinch-webdav", optional = true }
+filewinch-s3 = { path = "../filewinch-s3", optional = true }
+filewinch-azure = { path = "../filewinch-azure", optional = true }
+filewinch-swift = { path = "../filewinch-swift", optional = true }
+filewinch-cloud = { path = "../filewinch-cloud", optional = true }
+libc = "0.2"
+rune = { workspace = true, features = ["native-file-dialog", "tooling"] }
+rune-kit = { workspace = true }
+
+# Only to hide AppKit's standard About item, so Filewinch ▸ About opens Filewinch's own About
+# window (version, licence, notices, registration). Same objc2 Rune uses.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.5"
+
+[dev-dependencies]
+filewinch-testkit = { path = "../filewinch-testkit" }
+serde_json = { workspace = true }
+
+[target.'cfg(windows)'.build-dependencies]
+embed-resource = "3.0.12"

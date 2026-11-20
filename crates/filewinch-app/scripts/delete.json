@@ -1,0 +1,11 @@
+[
+  {"t": 0.2, "type": "tap", "key": "pane-1/viewport/rows/about.html"},
+  {"t": 0.35, "hold": "cmd"},
+  {"t": 0.4, "type": "tap", "key": "pane-1/viewport/rows/robots.txt"},
+  {"t": 0.6, "type": "tap", "key": "pane-1/viewport/rows/sitemap.xml"},
+  {"t": 0.7, "hold": ""},
+  {"t": 0.8, "type": "key", "name": "Backspace", "cmd": true},
+  {"t": 1.2, "type": "mark", "name": "confirm"},
+  {"t": 1.4, "type": "tap", "key": "confirm-ok"},
+  {"t": 3.0, "type": "mark", "name": "end"}
+]

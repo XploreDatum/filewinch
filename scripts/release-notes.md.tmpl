@@ -1,0 +1,55 @@
+Filewinch {{VERSION}}, a two-pane file transfer app for SFTP, FTP/FTPS, WebDAV, S3, Azure Blob Storage, OpenStack Swift, Google Drive, Dropbox, OneDrive and Box. Free software under the GNU AGPL v3 or later.
+
+{{CHANGELOG}}
+
+## Downloads
+
+| System | File |
+|---|---|
+| macOS 13 or later (Apple silicon and Intel) | `Filewinch-{{VERSION}}-macos-universal.dmg` |
+| Windows 10/11 (x64), installer | `Filewinch-{{VERSION}}-windows-x64.msi` |
+| Windows 10/11 (x64), portable | `Filewinch-{{VERSION}}-windows-x64.zip` |
+| Linux x86_64 | `Filewinch-{{VERSION}}-x86_64.AppImage` or `filewinch-{{VERSION}}-linux-x86_64.tar.gz` |
+| Linux ARM64 | `Filewinch-{{VERSION}}-aarch64.AppImage` or `filewinch-{{VERSION}}-linux-aarch64.tar.gz` |
+
+## Installing
+
+### macOS
+
+Open the `.dmg` and drag Filewinch to Applications. The app is signed with a Developer ID and notarized by Apple, so it opens without warnings.
+
+### Windows
+
+The `.msi` installs Filewinch for your user (no administrator rights needed) and adds it to the Start menu; uninstall it from Settings > Apps. The `.zip` is portable: unzip it anywhere and run `Filewinch.exe` (`Install-StartMenuShortcut.ps1` in the same folder adds a Start menu entry).
+
+{{#windows_signed}}
+The installer and `Filewinch.exe` are code-signed.
+{{/windows_signed}}
+{{#windows_unsigned}}
+**This Windows build is unsigned.** The first time you run the installer or `Filewinch.exe`, Microsoft Defender SmartScreen shows "Windows protected your PC". Click **More info**, check that the file name is the one you downloaded, then click **Run anyway**. Check the file's checksum first (below) to be sure it's the file published here.
+{{/windows_unsigned}}
+
+### Linux
+
+- **AppImage:** `chmod +x Filewinch-{{VERSION}}-*.AppImage`, then run it. On distributions without FUSE 2, run it with `--appimage-extract-and-run`.
+- **tar.gz:** `tar xzf filewinch-{{VERSION}}-linux-*.tar.gz && ./filewinch-{{VERSION}}-linux-*/install.sh` installs into `~/.local` (add `PREFIX=/usr/local sudo -E` for everyone; `install.sh --uninstall` removes it).
+
+Filewinch needs `libxkbcommon-x11-0` and a Vulkan driver (on Debian/Ubuntu: `sudo apt install libxkbcommon-x11-0 mesa-vulkan-drivers`). Passwords are kept in the Secret Service (GNOME Keyring or KWallet).
+
+## Checking the download
+
+`SHA256SUMS` lists the SHA-256 of every file in this release. In the folder you downloaded to:
+
+- macOS: `shasum -a 256 -c SHA256SUMS --ignore-missing`
+- Linux: `sha256sum -c SHA256SUMS --ignore-missing`
+- Windows (PowerShell): `(Get-FileHash .\Filewinch-{{VERSION}}-windows-x64.msi -Algorithm SHA256).Hash`, and compare it with the line for that file in `SHA256SUMS` (case doesn't matter).
+
+{{#minisign}}
+`SHA256SUMS` is signed with [minisign](https://jedisct1.github.io/minisign/). Download `SHA256SUMS.minisig` too and check it before trusting the sums:
+
+```sh
+minisign -Vm SHA256SUMS -P {{MINISIGN_PUBLIC_KEY}}
+```
+{{/minisign}}
+
+Source code: https://github.com/{{REPO}}/tree/v{{VERSION}}

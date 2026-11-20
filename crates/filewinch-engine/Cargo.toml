@@ -1,0 +1,15 @@
+[package]
+name = "filewinch-engine"
+description = "Filewinch transfer engine: job queue, copy/move/delete, conflicts, retries, folder sync."
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+filewinch-core = { workspace = true }
+globset = { version = "0.4", default-features = false }
+md5 = "0.8"
+sha1 = "0.10"
+sha2 = "0.10"
+
+[dev-dependencies]

@@ -1,0 +1,323 @@
+# Builds the Windows and Linux release files for a v* tag and puts them, with SHA256SUMS, on a
+# DRAFT GitHub Release named after the tag. The macOS .dmg is built, signed and notarized on a
+# Mac and attached afterwards by `scripts/release-mac.sh VERSION --upload`, which also updates
+# SHA256SUMS. Nothing is published until someone publishes the draft. See docs/RELEASING.md.
+#
+# Optional, off unless configured (Settings > Secrets and variables > Actions):
+#   Windows code signing (Azure Trusted Signing / Artifact Signing): secrets AZURE_TENANT_ID,
+#     AZURE_CLIENT_ID, AZURE_CLIENT_SECRET and variables AZURE_SIGNING_ENDPOINT,
+#     AZURE_SIGNING_ACCOUNT, AZURE_SIGNING_PROFILE. None set: unsigned, and the notes say so.
+#     Some but not all set: the run fails rather than silently shipping unsigned.
+#   SHA256SUMS signature (minisign): secret MINISIGN_SECRET_KEY (the key file's contents),
+#     secret MINISIGN_PASSWORD (empty for a key made with -W) and variable MINISIGN_PUBLIC_KEY.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to (re)build, e.g. v0.9.0
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  meta:
+    name: check the tag
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
+          persist-credentials: false
+      - id: v
+        name: tag matches the workspace version
+        run: |
+          case "$TAG" in v[0-9]*) ;; *) echo "::error::tag '$TAG' isn't v<version>"; exit 1 ;; esac
+          version=${TAG#v}
+          workspace=$(sed -n '/^\[workspace.package\]/,/^\[/{s/^version *= *"\(.*\)"/\1/p;}' Cargo.toml)
+          if [ "$workspace" != "$version" ]; then
+            echo "::error::tag $TAG doesn't match Cargo.toml's workspace version $workspace"
+            exit 1
+          fi
+          grep -q "^## \[$version\] - [0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}" CHANGELOG.md ||
+            { echo "::error::CHANGELOG.md needs a dated '## [$version] - YYYY-MM-DD' section"; exit 1; }
+          grep -q "<release version=\"$version\" date=" packaging/linux/app.xpdt.filewinch.metainfo.xml ||
+            { echo "::error::packaging/linux/app.xpdt.filewinch.metainfo.xml has no dated <release version=\"$version\">"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  windows:
+    name: Windows x64
+    needs: meta
+    runs-on: windows-latest
+    timeout-minutes: 90
+    outputs:
+      signed: ${{ steps.signing.outputs.enabled }}
+    env:
+      TARGET: x86_64-pc-windows-msvc
+      HAS_TENANT: ${{ secrets.AZURE_TENANT_ID != '' }}
+      HAS_CLIENT: ${{ secrets.AZURE_CLIENT_ID != '' }}
+      HAS_SECRET: ${{ secrets.AZURE_CLIENT_SECRET != '' }}
+      SIGN_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+      SIGN_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+      SIGN_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
+          persist-credentials: false
+
+      - id: signing
+        name: is Windows signing configured?
+        shell: bash
+        run: |
+          set=0; missing=()
+          for pair in "AZURE_TENANT_ID:$HAS_TENANT" "AZURE_CLIENT_ID:$HAS_CLIENT" "AZURE_CLIENT_SECRET:$HAS_SECRET"; do
+            if [ "${pair#*:}" = true ]; then set=$((set+1)); else missing+=("secret ${pair%%:*}"); fi
+          done
+          for pair in "AZURE_SIGNING_ENDPOINT:$SIGN_ENDPOINT" "AZURE_SIGNING_ACCOUNT:$SIGN_ACCOUNT" "AZURE_SIGNING_PROFILE:$SIGN_PROFILE"; do
+            if [ -n "${pair#*:}" ]; then set=$((set+1)); else missing+=("variable ${pair%%:*}"); fi
+          done
+          if [ $set = 0 ]; then
+            echo "Windows signing isn't configured: building unsigned."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          elif [ $set = 6 ]; then
+            echo "Windows signing configured: signing with Azure Trusted Signing."
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Windows signing is half configured; missing: ${missing[*]}"
+            exit 1
+          fi
+
+      - uses: ./.github/actions/setup
+        with:
+          targets: ${{ env.TARGET }}
+          cache-key: release
+
+      - name: build
+        run: cargo build --release --locked -p filewinch-app --target $env:TARGET
+
+      - name: sign Filewinch.exe
+        if: steps.signing.outputs.enabled == 'true'
+        uses: azure/trusted-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
+          files: ${{ github.workspace }}\target\${{ env.TARGET }}\release\filewinch.exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          description: Filewinch
+          description-url: https://github.com/${{ github.repository }}
+
+      - name: WiX Toolset 3.14 and cargo-wix
+        shell: bash
+        run: |
+          wix="$RUNNER_TEMP/wix314"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/wix314.zip" \
+            https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip
+          (cd "$RUNNER_TEMP" && echo "6ac824e1642d6f7277d0ed7ea09411a508f6116ba6fae0aa5f2c7daa2ff43d31  wix314.zip" | sha256sum -c -)
+          mkdir -p "$wix/bin"
+          unzip -q -o "$RUNNER_TEMP/wix314.zip" -d "$wix/bin"
+          echo "WIX=$(cygpath -w "$wix")" >> "$GITHUB_ENV"
+          cargo install cargo-wix --version 0.3.9 --locked
+
+      - name: package (zip and msi)
+        run: powershell -ExecutionPolicy Bypass -File scripts\package-windows.ps1 -Target $env:TARGET -NoBuild
+
+      - name: sign the MSI
+        if: steps.signing.outputs.enabled == 'true'
+        uses: azure/trusted-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
+          files-folder: ${{ github.workspace }}\dist\windows
+          files-folder-filter: msi
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          description: Filewinch installer
+          description-url: https://github.com/${{ github.repository }}
+
+      - name: check the files
+        shell: pwsh
+        env:
+          SIGNED: ${{ steps.signing.outputs.enabled }}
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          $files = @("dist\windows\Filewinch-$env:VERSION-windows-x64.zip", "dist\windows\Filewinch-$env:VERSION-windows-x64.msi")
+          foreach ($f in $files) { if (-not (Test-Path $f)) { throw "$f is missing" } }
+          # The exe carries the version (build.rs embeds it).
+          $exe = "target\$env:TARGET\release\filewinch.exe"
+          $info = (Get-Item $exe).VersionInfo
+          if ($info.ProductVersion -ne $env:VERSION) { throw "filewinch.exe says version '$($info.ProductVersion)', expected $env:VERSION" }
+          if ($env:SIGNED -eq 'true') {
+            foreach ($f in @($exe, $files[1])) {
+              $sig = Get-AuthenticodeSignature $f
+              if ($sig.Status -ne 'Valid') { throw "$f signature: $($sig.Status) $($sig.StatusMessage)" }
+              Write-Host "$f signed by $($sig.SignerCertificate.Subject)"
+            }
+          }
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-x64
+          path: |
+            dist/windows/*.zip
+            dist/windows/*.msi
+          if-no-files-found: error
+
+  linux:
+    name: Linux ${{ matrix.arch }}
+    needs: meta
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x86_64
+            appimagetool_sha256: ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+            appimagetool_sha256: f0837e7448a0c1e4e650a93bb3e85802546e60654ef287576f46c71c126a9158
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup
+        with:
+          cache-key: release
+
+      - name: packaging tools (appimagetool 1.9.1, desktop-file-utils, appstream)
+        run: |
+          sudo apt-get install -y -q --no-install-recommends desktop-file-utils appstream
+          bin="$RUNNER_TEMP/bin"
+          mkdir -p "$bin"
+          curl -fsSL --retry 3 -o "$bin/appimagetool" \
+            "https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-${{ matrix.arch }}.AppImage"
+          echo "${{ matrix.appimagetool_sha256 }}  $bin/appimagetool" | sha256sum -c -
+          chmod +x "$bin/appimagetool"
+          echo "$bin" >> "$GITHUB_PATH"
+          # Runners have no FUSE 2: run AppImages (appimagetool itself) by extracting them.
+          echo "APPIMAGE_EXTRACT_AND_RUN=1" >> "$GITHUB_ENV"
+
+      - name: build and package (tar.gz and AppImage)
+        run: scripts/package-linux.sh
+
+      - name: check the files
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          for f in "dist/linux/filewinch-$VERSION-linux-${{ matrix.arch }}.tar.gz" "dist/linux/Filewinch-$VERSION-${{ matrix.arch }}.AppImage"; do
+            [ -s "$f" ] || { echo "::error::$f is missing"; exit 1; }
+          done
+          file target/release/filewinch
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux-${{ matrix.arch }}
+          path: |
+            dist/linux/*.tar.gz
+            dist/linux/*.AppImage
+          if-no-files-found: error
+
+  release:
+    name: draft release
+    needs: [meta, windows, linux]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.meta.outputs.version }}
+      WINDOWS_SIGNED: ${{ needs.windows.outputs.signed }}
+      MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+      MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+      MINISIGN_PUBLIC_KEY: ${{ vars.MINISIGN_PUBLIC_KEY }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
+          persist-credentials: false
+
+      - uses: actions/download-artifact@v8
+        with:
+          path: out
+          merge-multiple: true
+
+      - name: SHA256SUMS
+        run: |
+          cd out
+          ls -l
+          sha256sum -- * > ../SHA256SUMS.ci
+          cd ..
+          # A re-run keeps lines for files CI didn't make (the Mac .dmg uploaded from a Mac).
+          if gh release view "$TAG" >/dev/null 2>&1 && gh release download "$TAG" -p SHA256SUMS -D prev 2>/dev/null; then
+            awk 'NR==FNR { ci[$2]=1; next } !($2 in ci)' SHA256SUMS.ci prev/SHA256SUMS > SHA256SUMS.kept
+          else
+            : > SHA256SUMS.kept
+          fi
+          sort -k2 SHA256SUMS.ci SHA256SUMS.kept > out/SHA256SUMS
+          cat out/SHA256SUMS
+
+      - name: sign SHA256SUMS (minisign)
+        if: env.MINISIGN_SECRET_KEY != ''
+        run: |
+          [ -n "$MINISIGN_PUBLIC_KEY" ] || { echo "::error::secret MINISIGN_SECRET_KEY is set but variable MINISIGN_PUBLIC_KEY isn't (the notes print it for verification)"; exit 1; }
+          sudo apt-get install -y -q minisign
+          umask 077
+          key="$RUNNER_TEMP/minisign.key"
+          printf '%s\n' "$MINISIGN_SECRET_KEY" > "$key"
+          printf '%s\n' "$MINISIGN_PASSWORD" | minisign -S -s "$key" -m out/SHA256SUMS -t "Filewinch $VERSION SHA256SUMS"
+          rm -f "$key"
+          printf 'untrusted comment: minisign public key\n%s\n' "$MINISIGN_PUBLIC_KEY" > "$RUNNER_TEMP/minisign.pub"
+          minisign -V -p "$RUNNER_TEMP/minisign.pub" -m out/SHA256SUMS
+
+      - name: release notes
+        run: |
+          python3 -I scripts/release-notes.py --version "$VERSION" --repo "$GH_REPO" \
+            --windows-signed "${WINDOWS_SIGNED:-false}" \
+            ${MINISIGN_SECRET_KEY:+--minisign-public-key "$MINISIGN_PUBLIC_KEY"} > notes.md
+          cat notes.md
+
+      - name: draft release
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            draft=$(gh release view "$TAG" --json isDraft -q .isDraft)
+            if [ "$draft" != true ]; then
+              echo "::error::release $TAG is already published; refusing to change its files"
+              exit 1
+            fi
+            gh release upload "$TAG" out/* --clobber
+            gh release edit "$TAG" --notes-file notes.md --title "Filewinch $VERSION"
+          else
+            gh release create "$TAG" out/* --draft --verify-tag --title "Filewinch $VERSION" --notes-file notes.md
+          fi
+          echo "Draft release $TAG is ready. Attach the Mac build: scripts/release-mac.sh $VERSION --upload" >> "$GITHUB_STEP_SUMMARY"

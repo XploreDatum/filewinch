@@ -1,0 +1,16 @@
+[package]
+name = "filewinch-local"
+description = "Filewinch's This Mac / This Computer backend: the Remote contract over the local disk on macOS, Linux and Windows."
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+filewinch-core = { workspace = true }
+filewinch-os = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }

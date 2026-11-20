@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=Filewinch
+GenericName=File Transfer
+Comment=Browse, transfer and sync files between your computer and remote servers
+Exec=filewinch %U
+TryExec=filewinch
+Icon=app.xpdt.filewinch
+Terminal=false
+Categories=Network;FileTransfer;Utility;
+Keywords=sftp;ftp;ftps;webdav;s3;azure;swift;google drive;dropbox;onedrive;box;upload;download;sync;transfer;remote;server;
+StartupNotify=true
+StartupWMClass=app.xpdt.filewinch

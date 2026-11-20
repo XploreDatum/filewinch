@@ -1,0 +1,20 @@
+[package]
+name = "filewinch-ftp"
+description = "Filewinch FTP and FTPS backend (suppaftp with rustls)."
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+filewinch-core = { workspace = true }
+filewinch-os = { workspace = true }
+suppaftp = { version = "13", features = ["rustls-ring", "deprecated"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-native-certs = "0.8"
+sha2 = "0.10"
+base64 = "0.22"
+
+[dev-dependencies]
+filewinch-testkit = { path = "../filewinch-testkit" }
+filewinch-engine = { path = "../filewinch-engine" }
+filewinch-local = { path = "../filewinch-local" }

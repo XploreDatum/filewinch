@@ -1,0 +1,40 @@
+// Filewinch's Windows resources. build.rs fills the placeholders (names between at signs)
+// and compiles the result with embed-resource. No #include: the constants below are spelled
+// out (winver.h and winuser.h values) so rc.exe, llvm-rc and windres read it without SDK headers.
+
+// The first icon is the one Explorer, the taskbar and Alt+Tab show for the exe.
+1 ICON "@ICON@"
+
+// RT_MANIFEST (24), resource 1: the manifest of a process's exe.
+1 24 "@MANIFEST@"
+
+// VS_VERSION_INFO (1). FILEOS VOS_NT_WINDOWS32, FILETYPE VFT_APP.
+1 VERSIONINFO
+FILEVERSION @VERSION_COMMAS@
+PRODUCTVERSION @VERSION_COMMAS@
+FILEFLAGSMASK 0x3fL
+FILEFLAGS @FILEFLAGS@
+FILEOS 0x40004L
+FILETYPE 0x1L
+FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        // US English, Unicode.
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName", "xpdt"
+            VALUE "FileDescription", "Filewinch file transfer"
+            VALUE "FileVersion", "@VERSION@"
+            VALUE "InternalName", "filewinch"
+            VALUE "LegalCopyright", "Copyright (c) xpdt"
+            VALUE "OriginalFilename", "Filewinch.exe"
+            VALUE "ProductName", "Filewinch"
+            VALUE "ProductVersion", "@VERSION@"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Filewinch.app's Info.plist. scripts/release-mac.sh fills @VERSION@ and @YEAR@.
+     LSMinimumSystemVersion 13.0: Rune's default `metal-backend` renders with MSL 3.0, which needs
+     macOS 13 (vendor/rune crates/rune/src/render/metallib.rs); the binary is built with
+     MACOSX_DEPLOYMENT_TARGET=13.0 to match, and release-mac.sh checks both slices' minos. -->
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key><string>app.xpdt.filewinch</string>
+  <key>CFBundleName</key><string>Filewinch</string>
+  <key>CFBundleDisplayName</key><string>Filewinch</string>
+  <key>CFBundleExecutable</key><string>filewinch</string>
+  <key>CFBundleIconFile</key><string>Filewinch</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>@VERSION@</string>
+  <key>CFBundleVersion</key><string>@VERSION@</string>
+  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+  <key>CFBundleDevelopmentRegion</key><string>en</string>
+  <key>LSMinimumSystemVersion</key><string>13.0</string>
+  <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
+  <key>NSHumanReadableCopyright</key><string>© @YEAR@ XploreDatum Technologies LLP. Free software under the GNU AGPL v3 or later.</string>
+</dict>
+</plist>

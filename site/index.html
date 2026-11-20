@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Filewinch: native file transfer for SFTP, S3 and cloud drives</title>
+<meta name="description" content="Filewinch is a free, open-source, native file-transfer app for macOS, Windows and Linux. A calm two-pane browser for SFTP, FTP, WebDAV, Amazon S3, Azure, Google Drive, Dropbox, OneDrive and Box, with a resumable transfer queue and folder sync.">
+<link rel="canonical" href="https://xploredatum.github.io/filewinch/">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#f7f9f9" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0d1312" media="(prefers-color-scheme: dark)">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Filewinch">
+<meta property="og:title" content="Filewinch: native file transfer for servers and clouds">
+<meta property="og:description" content="A free, open-source two-pane file-transfer app for macOS, Windows and Linux. SFTP, FTP, WebDAV, S3, Azure, Google Drive, Dropbox, OneDrive, Box.">
+<meta property="og:url" content="https://xploredatum.github.io/filewinch/">
+<meta property="og:image" content="https://xploredatum.github.io/filewinch/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The Filewinch window: two file panes and a transfer queue, beside the Filewinch winch icon.">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="favicon.ico" sizes="any">
+<link rel="icon" href="assets/icons/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png">
+<link rel="stylesheet" href="assets/site.css">
+<script>document.documentElement.className += " js";</script>
+<script src="config.js" defer></script>
+<script src="assets/site.js" defer></script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Filewinch","operatingSystem":"macOS, Windows, Linux","applicationCategory":"UtilitiesApplication","license":"https://www.gnu.org/licenses/agpl-3.0.html","url":"https://xploredatum.github.io/filewinch/","offers":[{"@type":"Offer","price":"0","priceCurrency":"USD"}],"author":{"@type":"Organization","name":"XploreDatum Technologies LLP"}}
+</script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="./"><img src="assets/icons/icon-128.png" alt="" width="32" height="32"><span>Filewinch</span></a>
+    <nav class="site-nav" aria-label="Main">
+      <ul>
+        <li class="opt"><a href="#features">Features</a></li>
+        <li><a href="buy.html">Pricing</a></li>
+        <li class="opt"><a href="https://github.com/XploreDatum/filewinch">Source</a></li>
+        <li class="nav-cta"><a href="download.html">Download</a></li>
+      </ul>
+    </nav>
+  </div>
+</header>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <symbol id="i-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="15" r="4.5"/><path d="M11.3 11.7 20 3M16.5 6.5l2.5 2.5M14 9l2 2"/></symbol>
+    <symbol id="i-updown" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 16V8M6.5 10.5 9 8l2.5 2.5M15 8v8M12.5 13.5 15 16l2.5-2.5"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.4 2.4 3.5 5.3 3.5 8.5s-1.1 6.1-3.5 8.5c-2.4-2.4-3.5-5.3-3.5-8.5S9.6 5.9 12 3.5z"/></symbol>
+    <symbol id="i-bucket" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="6" rx="8" ry="2.5"/><path d="M4 6l1.8 12.2c.2 1.5 2.9 2.3 6.2 2.3s6-.8 6.2-2.3L20 6"/></symbol>
+    <symbol id="i-cubes" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 7.5v9L12 21l8-4.5v-9z"/><path d="M4 7.5 12 12l8-4.5M12 12v9"/></symbol>
+    <symbol id="i-disks" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5.5" rx="7.5" ry="2.5"/><path d="M4.5 5.5v13c0 1.4 3.4 2.5 7.5 2.5s7.5-1.1 7.5-2.5v-13M4.5 12c0 1.4 3.4 2.5 7.5 2.5s7.5-1.1 7.5-2.5"/></symbol>
+    <symbol id="i-blocks" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="3.5"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5 3 8l9 4.5L21 8z"/><path d="M3 12l9 4.5 9-4.5M3 16l9 4.5 9-4.5"/></symbol>
+    <symbol id="i-cloud" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18.5h10.5a4 4 0 0 0 .6-8 6 6 0 0 0-11.6-1.4A4.8 4.8 0 0 0 7 18.5z"/></symbol>
+    <symbol id="i-cloud-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18.5h10.5a4 4 0 0 0 .6-8 6 6 0 0 0-11.6-1.4A4.8 4.8 0 0 0 7 18.5z"/><path d="M9 16v-4h2.2l.8 1H15v3z"/></symbol>
+    <symbol id="i-cloud-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18.5h10.5a4 4 0 0 0 .6-8 6 6 0 0 0-11.6-1.4A4.8 4.8 0 0 0 7 18.5z"/><path d="M12 16.5v-5M9.8 13.5 12 11.3l2.2 2.2"/></symbol>
+    <symbol id="i-cloud-sync" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18.5h10.5a4 4 0 0 0 .6-8 6 6 0 0 0-11.6-1.4A4.8 4.8 0 0 0 7 18.5z"/><path d="M9.5 13.2a2.6 2.6 0 0 1 4.6-1.2M14.5 15a2.6 2.6 0 0 1-4.6 1.2M14.3 10.8v1.4h-1.4M9.7 17.4V16h1.4"/></symbol>
+    <symbol id="i-cloud-doc" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18.5h10.5a4 4 0 0 0 .6-8 6 6 0 0 0-11.6-1.4A4.8 4.8 0 0 0 7 18.5z"/><path d="M10 16.5v-5h2.8l1.2 1.2v3.8z"/></symbol>
+    <symbol id="i-queue" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h10M4 12h10M4 18h6"/><path d="M18 9v9M15.5 15.5 18 18l2.5-2.5"/></symbol>
+    <symbol id="i-gauge" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4.2 17.5a8.5 8.5 0 1 1 15.6 0"/><path d="M12 13.5 16 9"/><circle cx="12" cy="14" r="1.3"/></symbol>
+    <symbol id="i-pencil" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l1-4.2L15.6 5.2a2 2 0 0 1 2.8 0l.4.4a2 2 0 0 1 0 2.8L8.2 19 4 20z"/><path d="M14 7l3 3"/></symbol>
+    <symbol id="i-drag" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="11" height="13" rx="2"/><path d="M12 12l8.5 3-3.6 1.4-1.4 3.6z"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.8l2.5 5.1 5.6.8-4 3.9.9 5.6-5-2.6-5 2.6.9-5.6-4-3.9 5.6-.8z"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="10.5" width="14" height="10" rx="2.5"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5M12 14.5v2"/></symbol>
+    <symbol id="i-access" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="7.8" r="1.2"/><path d="M7.5 10.2 12 11l4.5-.8M12 11v3l-2.2 4M12 14l2.2 4"/></symbol>
+    <symbol id="i-contrast" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v17a8.5 8.5 0 0 0 0-17z" fill="currentColor"/></symbol>
+    <symbol id="i-retry" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4.5v4h-4"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2.8v2M12 19.2v2M2.8 12h2M19.2 12h2M5.5 5.5l1.4 1.4M17.1 17.1l1.4 1.4M5.5 18.5l1.4-1.4M17.1 6.9l1.4-1.4"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M19.5 14.5A8 8 0 0 1 9.5 4.5a8 8 0 1 0 10 10z"/></symbol>
+    <symbol id="i-code" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 7 3.5 12l5 5M15.5 7l5 5-5 5M13.5 4.5l-3 15"/></symbol>
+  </defs>
+</svg>
+
+<main id="main">
+  <section class="hero" aria-labelledby="hero-title">
+    <div class="wrap">
+      <div class="intro">
+        <img class="app-icon" src="assets/icons/icon-256.png" alt="" width="96" height="96">
+        <span class="kicker">Free and open source · macOS · Windows · Linux</span>
+        <h1 id="hero-title">Your servers and clouds, side by side.</h1>
+        <p class="lede">Filewinch is a native file-transfer app with a calm, two-pane browser. Connect to SFTP, FTP, WebDAV, Amazon S3 and the big cloud drives, then drag files across, queue large transfers and keep folders in sync.</p>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="download.html"><svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3v10M5.5 8.5 10 13l4.5-4.5M4 16.5h12"/></svg><span data-download-label>Download Filewinch</span></a>
+          <a class="btn btn-secondary" href="buy.html">Pricing</a>
+        </div>
+        <p class="cta-note">Free forever, with every feature. An optional US$14 licence supports development and removes a small banner.</p>
+      </div>
+
+      <div class="showcase">
+        <div class="tablist" role="tablist" aria-label="Appearance">
+          <button type="button" role="tab" id="t-light" aria-controls="p-light" aria-selected="true"><svg aria-hidden="true"><use href="#i-sun"/></svg>Light</button>
+          <button type="button" role="tab" id="t-dark" aria-controls="p-dark" aria-selected="false" tabindex="-1"><svg aria-hidden="true"><use href="#i-moon"/></svg>Dark</button>
+        </div>
+        <div class="frame" role="tabpanel" id="p-light" aria-labelledby="t-light" tabindex="0">
+          <img src="assets/shots/macos-transfers.webp" width="1600" height="994" fetchpriority="high" alt="Filewinch in light mode on macOS. Favorites on the left, the local acme-site folder and the web1 production server in two panes, and the transfer queue below: an upload asks whether to replace index.html, skip it or keep both, while a delete waits and a download is paused.">
+        </div>
+        <div class="frame" role="tabpanel" id="p-dark" aria-labelledby="t-dark" tabindex="0" hidden>
+          <img src="assets/shots/macos-transfers-dark.webp" width="1600" height="994" loading="lazy" alt="The same Filewinch window in dark mode: two panes, Favorites and the transfer queue with its replace, skip or keep both question.">
+        </div>
+        <p class="caption">The transfer queue stops to ask before it overwrites anything, and lets the rest of the queue carry on.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="protocols" aria-labelledby="protocols-title">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="kicker">Connections</span>
+        <h2 id="protocols-title">Everywhere you keep files</h2>
+        <p>Servers, object stores and cloud drives all open in the same two panes, so moving a folder from a NAS to a bucket is one drag.</p>
+      </div>
+      <ul class="protocols">
+        <li><svg aria-hidden="true"><use href="#i-key"/></svg><div><strong>SFTP</strong><span>Password, key files, ssh-agent and your <code>~/.ssh/config</code></span></div></li>
+        <li><svg aria-hidden="true"><use href="#i-updown"/></svg><div><strong>FTP and FTPS</strong><span>Explicit and implicit TLS, passive or active</span></div></li>
+        <li><svg aria-hidden="true"><use href="#i-globe"/></svg><div><strong>WebDAV</strong><span>Over HTTP or HTTPS, Basic and Digest sign-in</span></div></li>
+        <li><svg aria-hidden="true"><use href="#i-bucket"/></svg><div><strong>Amazon S3</strong><span>Buckets as folders, server-side copy</span></div></li>
+        <li><svg aria-hidden="true"><use href="#i-cubes"/></svg><div><strong>S3-compatible</strong><span>Cloudflare R2, MinIO, Wasabi, DigitalOcean Spaces</span></div></li>
+        <li><svg aria-hidden="true"><use href="#i-disks"/></svg><div><strong>Backblaze B2</strong><span>Native B2 API, or its S3 endpoint</span></div></li>
+        <li><svg aria-hidden="true"><use href="#i-blocks"/></svg><div><strong>Azure Blob Storage</strong><span>Account key or SAS token</span></div></li>
+        <li><svg aria-hidden="true"><use href="#i-layers"/></svg><div><strong>OpenStack Swift</strong><span>Keystone v3 and v2, TempAuth</span></div></li>
+        <li><svg aria-hidden="true"><use href="#i-cloud-folder"/></svg><div><strong>Google Drive</strong><span>Sign in through your browser</span></div></li>
+        <li><svg aria-hidden="true"><use href="#i-cloud-up"/></svg><div><strong>Dropbox</strong><span>Sign in through your browser</span></div></li>
+        <li><svg aria-hidden="true"><use href="#i-cloud-sync"/></svg><div><strong>OneDrive</strong><span>Sign in through your browser</span></div></li>
+        <li><svg aria-hidden="true"><use href="#i-cloud-doc"/></svg><div><strong>Box</strong><span>Sign in through your browser</span></div></li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="section band" id="features" aria-labelledby="features-title">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="kicker">Features</span>
+        <h2 id="features-title">Careful with your files</h2>
+        <p>Filewinch shows you what it's about to do, asks when it matters, and recovers on its own when a connection drops.</p>
+      </div>
+
+      <div class="feature">
+        <div class="copy">
+          <h3>Folder sync you can read before it runs</h3>
+          <p>Compare two folders, anywhere, and get a plan: what will be copied, which way, and what will be deleted. Untick anything you'd rather leave alone, then synchronize.</p>
+          <ul class="ticks">
+            <li>Left to right, right to left, or both ways</li>
+            <li>Compare by size and date, size only, or checksum</li>
+            <li>Skip patterns such as <code>.DS_Store</code> and <code>.git</code></li>
+          </ul>
+        </div>
+        <div class="frame">
+          <picture>
+            <source srcset="assets/shots/macos-sync-dark.webp" media="(prefers-color-scheme: dark)">
+            <img src="assets/shots/macos-sync.webp" width="1400" height="1260" loading="lazy" alt="The Synchronize Folders sheet: left to right from acme-site to the web1 production server, comparing size and date, listing six files to copy and one to delete, with one change unticked.">
+          </picture>
+        </div>
+      </div>
+
+      <div class="feature flip">
+        <div class="copy">
+          <h3>Connect the way you already do</h3>
+          <p>Filewinch reads your SSH config and keys, talks to your ssh-agent, and keeps passwords in your system's secret store: Keychain on macOS, Credential Manager on Windows, Secret Service on Linux.</p>
+          <ul class="ticks">
+            <li>Pick a host straight from <code>~/.ssh/config</code></li>
+            <li>Password, key file or SSH agent</li>
+            <li>Save it to Favorites, sorted into folders</li>
+          </ul>
+        </div>
+        <div class="frame">
+          <picture>
+            <source srcset="assets/shots/macos-connect-sftp-dark.webp" media="(prefers-color-scheme: dark)">
+            <img src="assets/shots/macos-connect-sftp.webp" width="1400" height="1260" loading="lazy" alt="The Connect to a Server sheet for SFTP: hosts from the SSH config, server web1.example.com, port 22, user deploy, logging in with the key file ~/.ssh/id_ed25519, and an initial folder.">
+          </picture>
+        </div>
+      </div>
+
+      <div class="feature">
+        <div class="copy">
+          <h3>Trust is your decision</h3>
+          <p>When a server's host key or certificate is new or has changed, Filewinch stops and shows you its fingerprint. Trust it once, trust it always, or walk away.</p>
+          <ul class="ticks">
+            <li>SSH host keys checked against your known hosts</li>
+            <li>Self-signed FTPS and HTTPS certificates pinned only with your say-so</li>
+          </ul>
+        </div>
+        <div class="frame">
+          <picture>
+            <source srcset="assets/shots/macos-trust-dark.webp" media="(prefers-color-scheme: dark)">
+            <img src="assets/shots/macos-trust.webp" width="1400" height="1260" loading="lazy" alt="An Unknown Server Identity alert: Filewinch can't confirm this is really web1.example.com, shows the SHA256 fingerprint, and offers Cancel, Trust Once and Always Trust.">
+          </picture>
+        </div>
+      </div>
+
+      <div class="feature flip">
+        <div class="copy">
+          <h3>Shared folders stay safe</h3>
+          <p>Deleting a shared folder on a cloud drive can wipe it for everyone it's shared with. Filewinch never does that quietly: it explains what will happen and needs you to confirm it first.</p>
+          <ul class="ticks">
+            <li>Shared items are marked in the file list</li>
+            <li>Emptying a share for everyone needs an explicit tick</li>
+          </ul>
+        </div>
+        <div class="frame">
+          <picture>
+            <source srcset="assets/shots/macos-delete-shared-everyone-dark.webp" media="(prefers-color-scheme: dark)">
+            <img src="assets/shots/macos-delete-shared-everyone.webp" width="1400" height="1260" loading="lazy" alt="A Delete for everyone? dialog over a Dropbox folder: deleting the shared Design folder removes it for everyone it's shared with, and the Delete for Everyone button stays disabled until the person ticks that they understand.">
+          </picture>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="details" aria-labelledby="details-title">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="kicker">And the rest</span>
+        <h2 id="details-title">The everyday things, done properly</h2>
+      </div>
+      <div class="cards">
+        <div class="card"><svg aria-hidden="true"><use href="#i-queue"/></svg><h3>A transfer queue</h3><p>Pause, resume and cancel any transfer. Big folders start moving while they're still being counted.</p></div>
+        <div class="card"><svg aria-hidden="true"><use href="#i-retry"/></svg><h3>Resume and retry</h3><p>Dropped connections retry on their own and pick up from the bytes already sent, wherever the server allows it.</p></div>
+        <div class="card"><svg aria-hidden="true"><use href="#i-gauge"/></svg><h3>Bandwidth limits</h3><p>Cap the speed so a long upload doesn't swamp a video call.</p></div>
+        <div class="card"><svg aria-hidden="true"><use href="#i-pencil"/></svg><h3>Edit in place</h3><p>Open a remote file in your own editor. Save, and Filewinch uploads it back.</p></div>
+        <div class="card"><svg aria-hidden="true"><use href="#i-drag"/></svg><h3>Drag and drop</h3><p>Between the two panes, or to and from Finder, File Explorer and your Linux file manager.</p></div>
+        <div class="card"><svg aria-hidden="true"><use href="#i-star"/></svg><h3>Favorites</h3><p>Save sites into folders, search them, and reopen recent connections in a click.</p></div>
+        <div class="card"><svg aria-hidden="true"><use href="#i-lock"/></svg><h3>Secrets stay secret</h3><p>Passwords, passphrases and sign-in tokens live in your OS secret store, never in plain files.</p></div>
+        <div class="card"><svg aria-hidden="true"><use href="#i-contrast"/></svg><h3>Light and dark</h3><p>Follows your system appearance and accent colour, or pick one yourself.</p></div>
+        <div class="card"><svg aria-hidden="true"><use href="#i-access"/></svg><h3>Accessible</h3><p>Works with VoiceOver, Narrator, NVDA and Orca, and from the keyboard.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section band" id="native" aria-labelledby="native-title">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="kicker">Native</span>
+        <h2 id="native-title">At home on every desktop</h2>
+        <p>Built in Rust with the Rune GPU UI framework. No web view, no Electron: Filewinch looks like a Mac app on macOS, follows Windows 11's Fluent style on Windows, and fits GNOME and KDE on Linux.</p>
+      </div>
+      <div class="showcase" style="margin-top:0">
+        <div class="tablist" role="tablist" aria-label="Operating system" data-follow-os>
+          <button type="button" role="tab" id="t-mac" data-os="macos" aria-controls="p-mac" aria-selected="true">macOS</button>
+          <button type="button" role="tab" id="t-win" data-os="windows" aria-controls="p-win" aria-selected="false" tabindex="-1">Windows</button>
+          <button type="button" role="tab" id="t-lin" data-os="linux" aria-controls="p-lin" aria-selected="false" tabindex="-1">Linux</button>
+        </div>
+        <div class="frame" role="tabpanel" id="p-mac" aria-labelledby="t-mac" tabindex="0">
+          <picture>
+            <source srcset="assets/shots/macos-remote-dark.webp" media="(prefers-color-scheme: dark)">
+            <img src="assets/shots/macos-remote.webp" width="1600" height="994" loading="lazy" alt="Filewinch on macOS: a centred title, Favorites in a sidebar, the local acme-site folder on the left and the web1 production SFTP server on the right.">
+          </picture>
+        </div>
+        <div class="frame" role="tabpanel" id="p-win" aria-labelledby="t-win" tabindex="0" hidden>
+          <picture>
+            <source srcset="assets/shots/windows-remote-dark.webp" media="(prefers-color-scheme: dark)">
+            <img src="assets/shots/windows-remote.webp" width="1600" height="994" loading="lazy" alt="Filewinch on Windows 11: the title at the top left in Fluent style, with yellow folders, Favorites, and the local and server panes side by side.">
+          </picture>
+        </div>
+        <div class="frame" role="tabpanel" id="p-lin" aria-labelledby="t-lin" tabindex="0" hidden>
+          <picture>
+            <source srcset="assets/shots/linux-remote-dark.webp" media="(prefers-color-scheme: dark)">
+            <img src="assets/shots/linux-remote.webp" width="1600" height="994" loading="lazy" alt="Filewinch on Linux in a GNOME-style look: Favorites, and the local and server panes side by side.">
+          </picture>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="pricing" aria-labelledby="pricing-title">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="kicker">Pricing</span>
+        <h2 id="pricing-title">Free to use. Paid if you'd like to help.</h2>
+        <p>Every feature is in the free download, with no time limit. A one-time licence keeps development going and removes the banner.</p>
+      </div>
+      <div class="plans">
+        <div class="plan">
+          <h3>Free</h3>
+          <p class="price">US$0 <small>forever</small></p>
+          <ul class="ticks">
+            <li>Every protocol and every feature</li>
+            <li>No time limit, no account needed</li>
+            <li>A small banner invites you to buy a licence</li>
+          </ul>
+          <a class="btn btn-secondary" href="download.html">Download</a>
+        </div>
+        <div class="plan featured">
+          <h3>Supporter licence</h3>
+          <p class="price">US$14 <small>once, plus tax</small></p>
+          <ul class="ticks">
+            <li>Removes the banner</li>
+            <li>Funds new protocols, fixes and releases</li>
+            <li>Your key arrives by email straight away</li>
+          </ul>
+          <a class="btn btn-primary" href="buy.html">Buy a licence</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section band" aria-labelledby="oss-title">
+    <div class="wrap oss">
+      <svg aria-hidden="true"><use href="#i-code"/></svg>
+      <div>
+        <h2 id="oss-title" style="font-size:1.5rem">Open source, under the GNU AGPL</h2>
+        <p>Read the code, build it yourself, report a bug or send a fix. Filewinch sends no telemetry.</p>
+      </div>
+      <a class="btn btn-secondary" href="https://github.com/XploreDatum/filewinch">Source on GitHub</a>
+    </div>
+  </section>
+
+  <p class="wrap caption" style="padding:28px var(--gutter) 0;font-size:0.82rem">Amazon S3, Cloudflare R2, MinIO, Wasabi, DigitalOcean Spaces, Backblaze B2, Microsoft Azure, OneDrive, OpenStack, Google Drive, Dropbox and Box are trademarks of their owners. Filewinch isn't affiliated with or endorsed by them.</p>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <p style="margin:0">© 2026 XploreDatum Technologies LLP</p>
+    <ul>
+      <li><a href="license.html">AGPL-3.0-or-later</a></li>
+      <li><a href="https://github.com/XploreDatum/filewinch">Source</a></li>
+      <li><a href="privacy.html">Privacy</a></li>
+      <li><a href="buy.html">Pricing</a></li>
+      <li><a href="download.html">Download</a></li>
+    </ul>
+  </div>
+</footer>
+</body>
+</html>

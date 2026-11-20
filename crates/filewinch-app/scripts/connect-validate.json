@@ -1,0 +1,5 @@
+[
+  {"t": 0.2, "type": "key", "name": "k", "cmd": true},
+  {"t": 1.0, "type": "tap", "key": "connect-submit"},
+  {"t": 1.6, "type": "mark", "name": "end"}
+]

@@ -1,0 +1,18 @@
+[package]
+name = "filewinch-sftp"
+description = "Filewinch SFTP backend (russh + russh-sftp on a private tokio runtime)."
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+filewinch-core = { workspace = true }
+filewinch-os = { workspace = true }
+russh = { version = "0.65", default-features = false, features = ["flate2", "ring", "rsa"] }
+russh-sftp = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "time", "sync"] }
+
+[dev-dependencies]
+filewinch-testkit = { path = "../filewinch-testkit" }
+filewinch-engine = { path = "../filewinch-engine" }
+filewinch-local = { path = "../filewinch-local" }

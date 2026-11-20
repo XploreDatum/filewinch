@@ -1,0 +1,10 @@
+[
+  {"t": 0.2, "type": "double-click", "key": "pane-0/viewport/rows/crates"},
+  {"t": 0.8, "type": "mark", "name": "inside"},
+  {"t": 1.0, "type": "tap", "key": "back-0"},
+  {"t": 1.6, "type": "mark", "name": "back"},
+  {"t": 1.8, "type": "tap", "key": "pane-0/viewport/rows/docs"},
+  {"t": 2.0, "type": "key", "name": "Enter"},
+  {"t": 2.6, "type": "key", "name": "Up", "cmd": true},
+  {"t": 3.2, "type": "mark", "name": "end"}
+]
