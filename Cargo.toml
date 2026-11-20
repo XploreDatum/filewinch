@@ -43,8 +43,11 @@ debug = false
 
 # Release builds ship lean (one optimised codegen unit, whole-program LTO, no symbols in the binary)
 # but keep their symbols for crash reports: line tables are built, split out before stripping
-# (macOS: rustc runs dsymutil into filewinch.dSYM, then strips; Linux: filewinch.dwp) and the
-# packaging scripts keep them beside dist/, never in the app, DMG, tarball or AppImage.
+# (macOS: rustc runs dsymutil into filewinch.dSYM, then strips) and the packaging scripts keep
+# them beside dist/, never in the app or DMG.
+# Linux keeps no symbols: package-linux.sh sets CARGO_PROFILE_RELEASE_DEBUG=false (and
+# SPLIT_DEBUGINFO=off), because with any debuginfo rustc emits .debug_gdb_scripts, an allocated
+# section that stripping leaves in the binary.
 # Windows sets CARGO_PROFILE_RELEASE_STRIP=none (package-windows.ps1) so the linker still writes
 # filewinch.pdb; the .exe never holds debug info, only the PDB's id.
 # panic stays "unwind": a panic ends only its own thread (an engine or backend worker), and the

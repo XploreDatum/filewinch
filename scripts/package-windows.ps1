@@ -62,7 +62,8 @@ Set-StrictMode -Version 3.0
 $ErrorActionPreference = 'Stop'
 
 # Runs a native command with the arguments given, and throws when it exits non-zero
-# (PowerShell 5.1 doesn't). stdout is returned; stderr goes straight to the console.
+# (PowerShell 5.1 doesn't). stdout is returned; stderr goes straight to the console. On failure
+# stdout is printed before the throw (cargo wix --nocapture puts candle's and light's errors there).
 function Invoke-Native {
     param([Parameter(Mandatory)][string]$Exe, [string[]]$Arguments = @())
     # 'Continue' here so a native program's stderr lines never become terminating errors
@@ -70,6 +71,7 @@ function Invoke-Native {
     $ErrorActionPreference = 'Continue'
     $output = & $Exe @Arguments
     if ($LASTEXITCODE -ne 0) {
+        $output | Out-Host
         throw "'$Exe $($Arguments -join ' ')' failed with exit code $LASTEXITCODE."
     }
     $output

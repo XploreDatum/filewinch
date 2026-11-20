@@ -251,9 +251,10 @@ jobs:
             [ -s "$f" ] || { echo "::error::$f is missing"; exit 1; }
           done
           file target/release/filewinch
-          # Stripped (Cargo.toml's release profile): no symbol table or debug sections shipped.
-          if readelf -S target/release/filewinch | grep -qE '\.(symtab|debug_)'; then
-            echo "::error::target/release/filewinch isn't stripped"; exit 1
+          # Stripped (Cargo.toml's release profile, built without debuginfo by package-linux.sh):
+          # no symbol table or debug sections shipped.
+          if readelf -SW target/release/filewinch | grep -E '\.(symtab|debug_)'; then
+            echo "::error::target/release/filewinch isn't stripped (sections above)"; exit 1
           fi
 
       - uses: actions/upload-artifact@v7

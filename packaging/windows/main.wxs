@@ -53,9 +53,11 @@
     </Directory>
 
     <!-- Per-user components take an HKCU value as their key path (ICE38) and remove the
-         folders they create (ICE64). -->
+         folders they create (ICE64). A component holding files with a registry key path can't
+         have an auto-generated GUID (candle error CNDL0230), so FilewinchExe has a fixed one:
+         keep it for as long as the component installs the same files to the same place. -->
     <DirectoryRef Id="INSTALLDIR">
-      <Component Id="FilewinchExe" Guid="*">
+      <Component Id="FilewinchExe" Guid="F3523B47-3294-4284-B51A-62B43FB507F6">
         <File Id="FilewinchExe" Name="Filewinch.exe" Source="$(var.CargoTargetBinDir)\filewinch.exe"/>
         <File Id="FilewinchIco" Name="filewinch.ico" Source="$(var.RepoRoot)\assets\icon\filewinch.ico"/>
         <RegistryValue Root="HKCU" Key="Software\xpdt\Filewinch" Name="InstallDir" Type="string"

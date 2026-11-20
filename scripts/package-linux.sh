@@ -67,13 +67,18 @@ case "$arch" in
   x86_64|amd64) arch=x86_64 ;;
   aarch64|arm64) arch=aarch64 ;;
 esac
-echo "== cargo ${args[*]}"
+# The release profile builds line tables for crash symbolication (macOS keeps a dSYM, Windows a
+# PDB). Linux keeps no symbols, and any debuginfo makes rustc add .debug_gdb_scripts, an allocated
+# section that neither the linker's --strip-all nor strip(1) removes, so build without it here.
+export CARGO_PROFILE_RELEASE_DEBUG=false CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO=off
+echo "== CARGO_PROFILE_RELEASE_DEBUG=false CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO=off cargo ${args[*]}"
 cargo "${args[@]}"
 [ -x "$bin" ] || die "build finished but $bin is missing"
-# The release profile strips the binary (Cargo.toml); nothing debug-related goes in the tarball
-# or the AppImage, which copy only the files named below.
-if command -v readelf >/dev/null && readelf -S "$bin" | grep -qE '\.(symtab|debug_)'; then
-  die "$bin isn't stripped; check [profile.release] strip = \"symbols\" in Cargo.toml"
+# The release profile strips the binary (Cargo.toml) and the build above has no debuginfo; nothing
+# debug-related goes in the tarball or the AppImage, which copy only the files named below.
+if command -v readelf >/dev/null && readelf -SW "$bin" | grep -qE '\.(symtab|debug_)'; then
+  readelf -SW "$bin" | grep -E '\.(symtab|debug_)' >&2
+  die "$bin isn't stripped (sections above); check [profile.release] strip = \"symbols\" in Cargo.toml"
 fi
 
 dist="$root/dist/linux"
