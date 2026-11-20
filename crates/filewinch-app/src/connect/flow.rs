@@ -277,7 +277,7 @@ impl Ui {
         }
     }
 
-    fn close_if_unused(&mut self, session: u64) {
+    pub(crate) fn close_if_unused(&mut self, session: u64) {
         if self.panes.iter().all(|x| x.session() != Some(session)) {
             if let Some(i) = self.sessions.iter().position(|s| s.id == session) {
                 let s = self.sessions.remove(i);

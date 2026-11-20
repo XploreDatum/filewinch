@@ -2,7 +2,9 @@
 # Builds a release Filewinch.app (bundle id app.xpdt.filewinch) into dist/.
 #   scripts/bundle.sh                 -> dist/Filewinch.app, signed ad hoc
 #   MAC_APP_SIGN="Developer ID Application: …" scripts/bundle.sh   signs with that identity
-#   FILEWINCH_FEATURES="sftp ftp" scripts/bundle.sh                 backends to include
+#   FILEWINCH_FEATURES="sftp ftp" scripts/bundle.sh                 backends to include (default: all)
+# Like the shipped app it leaves out the dev tools (--snap, --scene, demo data); `cargo run` and
+# scripts/screens.sh have them.
 # For in-place relaunching while developing, Rune's vendor/rune/scripts/mac-app installs the
 # same binary into ~/Applications instead.
 set -euo pipefail
@@ -10,8 +12,7 @@ cd "$(dirname "$0")/.."
 root=$(pwd)
 version=$(cargo metadata --format-version 1 --no-deps | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"]=="filewinch-app"))')
 target=$(cargo metadata --format-version 1 --no-deps | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')
-args=(-p filewinch-app --release)
-[[ -n "${FILEWINCH_FEATURES:-}" ]] && args+=(--features "$FILEWINCH_FEATURES")
+args=(-p filewinch-app --release --no-default-features --features "${FILEWINCH_FEATURES:-backends}")
 cargo build "${args[@]}"
 
 app="$root/dist/Filewinch.app"

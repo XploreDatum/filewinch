@@ -37,15 +37,27 @@ impl Ui {
     /// Queues a job and remembers why. Returns its id.
     pub fn enqueue(&mut self, job: Job, purpose: Purpose, touched: Vec<(u64, RPath)>) -> JobId {
         let label = job.label.clone();
+        let dest = job.dst_dir.as_ref().map(|d| if d.is_root() { "/".to_owned() } else { d.name().to_owned() }).unwrap_or_default();
         // This Mac is whatever isn't one of the window's server sessions.
         let local = |r: &Arc<dyn Remote>| !self.sessions.iter().any(|s| Arc::ptr_eq(&s.remote, r));
         let direction = Direction::of(&job.op, local(&job.src), job.dst.as_ref().map(local));
         let visible = matches!(purpose, Purpose::Plain);
+        // Which pane sources the job's per-file events speak of (0 is This Mac).
+        let session = |r: &Arc<dyn Remote>| self.sessions.iter().find(|s| Arc::ptr_eq(&s.remote, r)).map(|s| s.id).or(local(r).then_some(0));
+        let writes = match job.op {
+            Op::Delete | Op::SetMode { .. } => session(&job.src),
+            _ => job.dst.as_ref().and_then(session),
+        };
+        let reads = (job.op == Op::Move).then(|| session(&job.src)).flatten();
         let id = hub().engine.enqueue(job);
-        self.jobs.insert(id, JobMeta { purpose, touched });
+        self.jobs.insert(id, JobMeta { purpose, touched, writes, reads, direction });
         self.transfers.apply(&Event::Added(id));
         self.transfers.set_label(id, &label);
         self.transfers.set_direction(id, direction);
+        if let Some(r) = self.transfers.row_mut(id) {
+            r.files_at_once = hub().engine.job_files(id).unwrap_or(0);
+            r.dest = dest;
+        }
         if visible {
             self.prefs.transfers_open = true;
         }

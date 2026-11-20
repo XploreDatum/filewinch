@@ -348,6 +348,7 @@ impl Remote for OneDrive {
             real_dirs: true,
             server_rename: true,
             server_copy: true,
+            ranged_reads: true,
         }
     }
 
@@ -420,6 +421,17 @@ impl Remote for OneDrive {
         Ok(reader)
     }
 
+    fn read_range(&self, path: &RPath, offset: u64, len: u64) -> Result<Box<dyn Read + Send>> {
+        let n = self.0.resolve(path)?;
+        if n.dir {
+            return Err(error(ErrorKind::InvalidPath, P.label(), path, "it's a folder"));
+        }
+        let call = Call::get(format!("{}/content", self.0.item_url(&n)))
+            .header("Range", filewinch_core::range_header(offset, len))
+            .subject(path)
+            .classify(classify);
+        crate::http::ranged_body(self.0.s.send(call)?, offset, len, &format!("“{}”", path.name()))
+    }
     fn write(&self, path: &RPath, offset: u64, size: Option<u64>) -> Result<Box<dyn WriteSink>> {
         if offset > 0 {
             return Err(Error::unsupported("resuming uploads to OneDrive"));

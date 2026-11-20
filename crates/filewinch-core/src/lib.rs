@@ -7,12 +7,14 @@
 
 mod error;
 mod path;
+mod range;
 mod secrets;
 mod site;
 mod trust;
 
 pub use error::{Error, ErrorKind, Result};
 pub use path::RPath;
+pub use range::{check_range_reply, exact_reader, range_header};
 pub use secrets::{FnSecrets, MemorySecrets, Secrets};
 pub use site::{Auth, Protocol, SecretRef, Site, TlsMode};
 pub use trust::{fingerprint_from_sha256, is_trusted, normalize_fingerprint};
@@ -37,6 +39,10 @@ pub struct Caps {
     pub server_rename: bool,
     /// Server-side copy within the same remote.
     pub server_copy: bool,
+    /// Several [`Remote::read_range`] calls on one file can run at once, each on its own
+    /// connection, channel or request, so the engine may download a large file in parallel
+    /// pieces. False where that gains nothing (the local disk) or the protocol can't.
+    pub ranged_reads: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -132,6 +138,21 @@ pub trait WriteSink: Write + Send {
     fn finish(self: Box<Self>) -> Result<()>;
 }
 
+/// A file the engine fills in pieces from several threads at once (a segmented download).
+/// Each write lands at an absolute offset. Dropping it without `finish` aborts: it closes
+/// without committing anything further and keeps the bytes already written, so an interrupted
+/// download can continue later; the engine deletes the file itself when it gives up on it.
+pub trait PositionalSink: Send + Sync {
+    fn write_at(&self, offset: u64, buf: &[u8]) -> Result<()>;
+    /// Makes everything written so far durable. The engine calls it before it records a range
+    /// as finished, so a crash never leaves a record of bytes that weren't saved.
+    fn sync(&self) -> Result<()> {
+        Ok(())
+    }
+    /// Flushes and closes.
+    fn finish(self: Box<Self>) -> Result<()>;
+}
+
 /// One connected session. Implementations are `Send + Sync`; the engine may call from several
 /// threads, and a backend that needs one connection per transfer opens it internally (pooled).
 pub trait Remote: Send + Sync {
@@ -151,6 +172,24 @@ pub trait Remote: Send + Sync {
 
     /// Opens a file for reading starting at `offset` (0 unless `caps().resume_read`).
     fn read(&self, path: &RPath, offset: u64) -> Result<Box<dyn Read + Send>>;
+
+    /// Opens `len` bytes of a file starting at `offset`. The reader yields exactly those bytes
+    /// (fewer only when the file ends first) and fails rather than return anything else: a
+    /// server that ignores the range fails with [`Error::range_ignored`], one that refuses
+    /// another connection with [`Error::too_many_connections`]. With [`Caps::ranged_reads`]
+    /// the engine calls this from several threads at once for one file. Default:
+    /// [`Remote::read`] at `offset`, cut off after `len` bytes.
+    fn read_range(&self, path: &RPath, offset: u64, len: u64) -> Result<Box<dyn Read + Send>> {
+        Ok(Box::new(self.read(path, offset)?.take(len)))
+    }
+
+    /// Opens `path` for writes at any offset, from several threads at once: created when
+    /// missing, existing bytes kept (so an interrupted segmented download continues), length
+    /// set to `size` (preallocated where that's cheap). Default: unsupported; the engine then
+    /// downloads over one connection.
+    fn open_positional(&self, _path: &RPath, _size: u64) -> Result<Box<dyn PositionalSink>> {
+        Err(Error::unsupported("writing a file in parallel pieces"))
+    }
 
     /// Opens a file for writing. `offset > 0` appends to an existing partial file and is only
     /// passed when `caps().resume_write`. `size` is the total final size when known, so object

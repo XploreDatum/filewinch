@@ -65,6 +65,10 @@ fn name_cell(s: &Ui, p: usize, e: &filewinch_core::Entry, k: &Kit, paint: &Paint
             if e.shared.is_some() {
                 t = t.child(shared_badge(k));
             }
+            if let Some(doing) = pane.incoming.get(&e.name) {
+                // A transfer is writing it: a small spinner (the Kind column says which way).
+                t = t.child(Spinner::new().size(12.0).build(k).key("incoming").help(*doing));
+            }
             t
         }
     };
@@ -106,7 +110,11 @@ fn row_el(s: &Ui, p: usize, i: usize, k: &Kit, paint: &Paint, now: SystemTime, w
     let mut r = row()
         .key(name.clone())
         .role("row")
-        .label(if e.shared.is_some() { format!("{name}, shared") } else { name.clone() })
+        .label(match (pane.incoming.get(&name), e.shared.is_some()) {
+            (Some(doing), _) => format!("{name}, {}", doing.trim_end_matches('…').to_lowercase()),
+            (None, true) => format!("{name}, shared"),
+            (None, false) => name.clone(),
+        })
         .checked(selected)
         .w_full()
         .h(paint.row_h)
@@ -126,7 +134,11 @@ fn row_el(s: &Ui, p: usize, i: usize, k: &Kit, paint: &Paint, now: SystemTime, w
             ColumnId::Name | ColumnId::Unknown => name_cell(s, p, e, k, paint, selected, ink),
             ColumnId::Size => muted(size_text(e)).align(Align::End),
             ColumnId::Modified => muted(e.modified.map(|m| fmt::date(m, now)).unwrap_or_else(|| "—".into())),
-            ColumnId::Kind => muted(file_kind(e).describe(&e.name)),
+            ColumnId::Kind => match pane.incoming.get(&name) {
+                // A file on its way says so in the accent, until it lands.
+                Some(doing) => text(*doing).font(k.ty.text_small).color(ink.unwrap_or(paint.accent)).truncate(),
+                None => muted(file_kind(e).describe(&e.name)),
+            },
             // Blank where the server doesn't say.
             ColumnId::Permissions => text(e.mode.map(fmt::mode_string).unwrap_or_default()).font(k.ty.mono).color(muted_ink).truncate(),
         };
@@ -178,6 +190,16 @@ fn body(s: &Ui, p: usize, k: &Kit, avail: Option<f32>) -> El {
             col().key("state").w_full().grow(1.0).center().gap(10.0)
                 .child(Spinner::new().size(18.0).build(k))
                 .child(text("Loading…").font(k.ty.text_small).color(k.c.text_muted).live_region(rune::LiveRegion::Polite))
+        }
+        Listing::Failed(_) if let Some(name) = s.disconnected(p) => {
+            // The disk or share this folder was on went away: say so, and offer a way out.
+            let home = Button::new("Go to Home Folder").variant(ButtonVariant::Neutral).control_size(ControlSize::Small)
+                .on_press(move |s: &mut Ui| s.go_home(p)).build(k).key("go-home");
+            let retry = Button::new("Try Again").variant(ButtonVariant::Ghost).control_size(ControlSize::Small)
+                .on_press(move |s: &mut Ui| s.refresh_pane(p)).build(k).key("retry");
+            centered(k, &format!("“{name}” was disconnected."), Some("Reconnect it and try again, or go back to your home folder."), Some(row().gap(8.0).child(retry).child(home)))
+                .key("disconnected")
+                .role("alert")
         }
         Listing::Failed(e) => {
             let retry = Button::new("Try Again").variant(ButtonVariant::Neutral).control_size(ControlSize::Small)

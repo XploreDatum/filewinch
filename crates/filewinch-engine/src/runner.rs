@@ -2,14 +2,30 @@
 //! clean up folders and summarise.
 
 use crate::control::JobCtl;
+use crate::items::{ItemState, Items, Live};
 use crate::meter::Meter;
 use crate::{EngineConfig, Event, Inner, Job, JobId, JobState, Op, Phase, transfer, walk};
 use filewinch_core::{Entry, Error, ErrorKind, RPath, Remote, Result};
 use std::collections::HashSet;
 use std::hash::{BuildHasher, Hasher};
 use std::sync::mpsc::{Receiver, Sender, channel};
+use std::cell::RefCell;
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+
+thread_local! {
+    /// The file this thread is moving (a worker, or one of a segmented download's threads).
+    static CURRENT: RefCell<Option<Arc<Live>>> = const { RefCell::new(None) };
+}
+
+pub(crate) fn current_item() -> Option<Arc<Live>> {
+    CURRENT.with(|c| c.borrow().clone())
+}
+
+pub(crate) fn set_current_item(live: Option<Arc<Live>>) {
+    CURRENT.with(|c| *c.borrow_mut() = live);
+}
 
 pub(crate) struct JobCtx {
     pub inner: Arc<Inner>,
@@ -18,6 +34,10 @@ pub(crate) struct JobCtx {
     pub ctl: Arc<JobCtl>,
     pub meter: Arc<Meter>,
     pub done: Arc<Mutex<HashSet<RPath>>>,
+    pub notes: Arc<Mutex<Vec<String>>>,
+    pub items: Arc<Items>,
+    /// Temp files of unfinished segmented downloads (see [`crate::Engine::forget`]).
+    pub partials: Arc<Mutex<HashSet<RPath>>>,
     pub cfg: EngineConfig,
 }
 
@@ -26,6 +46,8 @@ pub(crate) struct Item {
     pub src: Entry,
     /// Where it should land (before conflict handling). Unused for Delete.
     pub dst: RPath,
+    /// Its live counters and skip flag (see [`crate::Engine::skip_item`]).
+    pub live: Arc<Live>,
     /// Move only: copy it but leave the source, because it is (inside) a shared item that a
     /// copy-then-delete would empty for everyone.
     pub keep_src: bool,
@@ -44,6 +66,8 @@ pub(crate) struct Tally {
     /// Source paths that remain after the job (failed or skipped), so their parent folders
     /// must not be removed by a Move or Delete.
     pub kept: Mutex<Vec<RPath>>,
+    /// Files the person skipped.
+    pub skipped: std::sync::atomic::AtomicUsize,
 }
 
 impl Tally {
@@ -72,9 +96,65 @@ impl JobCtx {
         self.inner.emit(ev);
     }
 
+    /// Adds a line to the job's notes ([`crate::Engine::notes`]).
+    pub fn note(&self, line: String) {
+        self.notes.lock().unwrap_or_else(|e| e.into_inner()).push(line);
+    }
+
+    /// Records (or clears) a temp file this job keeps on its destination.
+    pub fn track_partial(&self, temp: &RPath, kept: bool) {
+        let mut p = self.partials.lock().unwrap_or_else(|e| e.into_inner());
+        if kept {
+            p.insert(temp.clone());
+        } else {
+            p.remove(temp);
+        }
+    }
+
     pub fn progress_tick(&self) {
         if let Some(p) = self.meter.maybe_sample() {
             self.emit(Event::Progress(self.id, p));
+        }
+        if self.items.take_event(false) {
+            self.emit(Event::ItemsChanged(self.id));
+        }
+    }
+
+    /// Counts bytes for the job and for the file this thread is moving.
+    pub fn add_bytes(&self, n: u64) {
+        self.meter.add_bytes(n);
+        if let Some(l) = current_item() {
+            l.bytes.fetch_add(n, Ordering::Relaxed);
+        }
+    }
+
+    pub fn sub_bytes(&self, n: u64) {
+        self.meter.sub_bytes(n);
+        if let Some(l) = current_item() {
+            let _ = l.bytes.try_update(Ordering::Relaxed, Ordering::Relaxed, |b| Some(b.saturating_sub(n)));
+        }
+    }
+
+    /// Between chunks: blocks while paused, fails once the job is cancelled or this thread's
+    /// file was skipped.
+    pub fn checkpoint(&self) -> Result<()> {
+        match current_item() {
+            Some(l) => self.ctl.checkpoint_or(&l.skip),
+            None => self.ctl.checkpoint(),
+        }
+    }
+
+    /// True when this thread's file was skipped.
+    pub fn item_skipped(&self) -> bool {
+        current_item().is_some_and(|l| l.skip.load(Ordering::SeqCst))
+    }
+
+    /// The path as the Transfers list shows it: from the selected item down ("20nov/a.mov").
+    pub fn rel(&self, p: &RPath) -> String {
+        let base = self.job.src_paths.iter().find(|s| p.starts_with(s)).and_then(|s| s.parent());
+        match base {
+            Some(b) if !b.is_root() => p.as_str()[b.as_str().len()..].trim_start_matches('/').to_owned(),
+            _ => p.as_str().trim_start_matches('/').to_owned(),
         }
     }
 
@@ -91,9 +171,19 @@ impl JobCtx {
     /// Waits out a backoff for `attempt`, showing the job as Retrying meanwhile.
     pub fn backoff(&self, attempt: u32, err: &Error) -> Result<()> {
         let d = backoff_delay(self.cfg.retry_delay, attempt, err.retry_after);
-        let token = self.ctl.begin_retry(attempt, Instant::now() + d);
+        let at = Instant::now() + d;
+        let token = self.ctl.begin_retry(attempt, at);
+        let live = current_item();
+        if let Some(l) = &live {
+            *l.retry_at.lock().unwrap_or_else(|e| e.into_inner()) = Some(at);
+            self.items.touch();
+        }
         self.inner.refresh(self.id);
         let r = self.ctl.sleep(d);
+        if let Some(l) = &live {
+            *l.retry_at.lock().unwrap_or_else(|e| e.into_inner()) = None;
+            self.items.touch();
+        }
         self.ctl.end_retry(token);
         self.inner.refresh(self.id);
         r
@@ -132,6 +222,7 @@ pub(crate) fn run(ctx: &JobCtx) -> JobState {
     let tally = Tally::default();
     let result = match ctx.job.op {
         Op::Delete => run_delete(ctx, &tally),
+        Op::SetMode { mode, mask, dirs_get_x_where_r } => run_set_mode(ctx, &tally, mode, mask, dirs_get_x_where_r),
         Op::Copy | Op::Move => run_transfer(ctx, &tally),
     };
     finish_state(ctx, &tally, result)
@@ -152,13 +243,19 @@ fn finish_state(ctx: &JobCtx, tally: &Tally, result: Result<()>) -> JobState {
         Op::Copy => "copied",
         Op::Move => "moved",
         Op::Delete => "deleted",
+        Op::SetMode { .. } => "changed",
     };
     let total = ctx.meter.progress().files_total.unwrap_or(0).max(failed.len() as u64);
-    let message = if failed.len() == 1 {
+    let mut message = if failed.len() == 1 {
         format!("{} couldn't be {verb}: {}", failed[0].0.name(), failed[0].1.message)
     } else {
         format!("{} of {total} items couldn't be {verb}.", failed.len())
     };
+    match tally.skipped.load(Ordering::SeqCst) {
+        0 => {}
+        1 => message.push_str(" 1 was skipped."),
+        n => message.push_str(&format!(" {n} were skipped.")),
+    }
     let kind = if failed.iter().all(|f| f.1.kind == failed[0].1.kind) { failed[0].1.kind } else { ErrorKind::Other };
     let mut detail: Vec<String> = failed.iter().take(10).map(|(p, e)| format!("{p}: {e}")).collect();
     if failed.len() > 10 {
@@ -176,7 +273,10 @@ fn with_workers(
 ) -> Result<()> {
     let (tx, rx) = channel::<Item>();
     let rx = Mutex::new(rx);
-    let n = ctx.cfg.max_files_per_job.max(1);
+    ctx.ctl.init_files_limit(ctx.cfg.max_files_per_job);
+    // Enough workers for the largest limit the job may be given while it runs; the job's
+    // files limit (see `Engine::set_job_files`) decides how many work at once.
+    let n = ctx.ctl.files_limit().max(crate::MAX_FILES_PER_JOB_LIVE);
     std::thread::scope(|s| {
         for _ in 0..n {
             s.spawn(|| worker(ctx, tally, &rx, &work));
@@ -197,23 +297,67 @@ fn worker(ctx: &JobCtx, tally: &Tally, rx: &Mutex<Receiver<Item>>, work: &(impl 
             Ok(i) => i,
             Err(_) => return,
         };
-        if ctx.ctl.is_cancelled() {
-            continue; // drain without doing anything
+        if item.live.skip.load(Ordering::SeqCst) {
+            skipped_by_person(ctx, tally, &item);
+            continue;
         }
-        match work(&item) {
+        // Then a file slot, so a lowered limit holds new files back (in-flight ones finish).
+        if ctx.ctl.acquire_file().is_err() {
+            continue; // cancelled: drain without doing anything
+        }
+        if item.live.skip.load(Ordering::SeqCst) {
+            ctx.ctl.release_file();
+            skipped_by_person(ctx, tally, &item);
+            continue;
+        }
+        let path = if matches!(ctx.job.op, Op::Delete | Op::SetMode { .. }) { item.src.path.clone() } else { item.dst.clone() };
+        ctx.emit(Event::ItemStarted { job: ctx.id, path: path.clone(), size: item.src.size });
+        ctx.items.set(&item.src.path, ItemState::Active, None);
+        set_current_item(Some(item.live.clone()));
+        let result = work(&item);
+        set_current_item(None);
+        ctx.ctl.release_file();
+        // Written, moved, deleted or failed: the destination may have changed. A skip changed
+        // nothing, so it says nothing here.
+        let done = |ctx: &JobCtx| {
+            let from = (ctx.job.op == Op::Move).then(|| item.src.path.clone());
+            ctx.emit(Event::ItemDone { job: ctx.id, path: path.clone(), from });
+        };
+        match result {
             Ok(Outcome::Done) => {
+                done(ctx);
                 ctx.done.lock().unwrap_or_else(|e| e.into_inner()).insert(item.src.path.clone());
                 ctx.meter.file_done();
+                ctx.items.set(&item.src.path, ItemState::Done, None);
             }
             Ok(Outcome::Skipped) => {
                 tally.keep(&item.src.path);
                 ctx.meter.add_bytes(item.src.size.unwrap_or(0));
                 ctx.meter.file_done();
+                ctx.items.set(&item.src.path, ItemState::Skipped, None);
             }
-            Err(e) => ctx.fail(tally, &item.src.path, e),
+            Err(_) if item.live.skip.load(Ordering::SeqCst) => {
+                // Stopped by a skip: what it moved no longer counts.
+                ctx.meter.sub_bytes(item.live.bytes.swap(0, Ordering::SeqCst));
+                skipped_by_person(ctx, tally, &item);
+            }
+            Err(e) => {
+                done(ctx);
+                ctx.items.set(&item.src.path, ItemState::Failed, Some(e.clone()));
+                ctx.fail(tally, &item.src.path, e);
+            }
         }
         ctx.progress_tick();
     }
+}
+
+/// A file the person skipped: it leaves the totals, keeps its source (for a Move) and never
+/// fails the job.
+fn skipped_by_person(ctx: &JobCtx, tally: &Tally, item: &Item) {
+    tally.keep(&item.src.path);
+    tally.skipped.fetch_add(1, Ordering::SeqCst);
+    ctx.meter.remove_total(1, item.src.size.unwrap_or(0));
+    ctx.items.set(&item.src.path, ItemState::Skipped, None);
 }
 
 fn run_transfer(ctx: &JobCtx, tally: &Tally) -> Result<()> {
@@ -260,6 +404,64 @@ fn run_delete(ctx: &JobCtx, tally: &Tally) -> Result<()> {
     )?;
     if !ctx.ctl.is_cancelled() {
         remove_dirs(ctx, tally, &dirs);
+    }
+    Ok(())
+}
+
+fn run_set_mode(ctx: &JobCtx, tally: &Tally, mode: u32, mask: u32, x_rule: bool) -> Result<()> {
+    if !ctx.src().caps().permissions {
+        return Err(Error::new(ErrorKind::Unsupported, "This server doesn't support changing permissions."));
+    }
+    let change = |e: &Entry| -> Result<()> {
+        ctx.meter.set_current(&e.path);
+        let old = match e.mode {
+            Some(m) => m,
+            None if mask & 0o7777 == 0o7777 => 0,
+            None => match ctx.retrying(|| ctx.src().stat(&e.path))?.mode {
+                Some(m) => m,
+                None => {
+                    let msg = format!("The server didn't say what permissions “{}” has, so they couldn't be changed in part.", e.name);
+                    return Err(Error::new(ErrorKind::Unsupported, msg));
+                }
+            },
+        };
+        let new = crate::applied_mode(old, e.is_dir(), mode, mask, x_rule);
+        if new != old & 0o7777 {
+            ctx.checkpoint()?;
+            ctx.retrying(|| ctx.src().set_mode(&e.path, new))?;
+        }
+        Ok(())
+    };
+    let mut dirs = Vec::new();
+    with_workers(ctx, tally, |item| change(&item.src).map(|()| Outcome::Done), |tx| walk::scan_set_mode(ctx, tally, tx, &mut dirs))?;
+    // Folders last, deepest first: everything inside is done, so no change locks the job out.
+    for (d, live) in dirs.iter().rev() {
+        if ctx.ctl.is_cancelled() {
+            break;
+        }
+        ctx.ctl.checkpoint()?;
+        if live.skip.load(Ordering::SeqCst) || ctx.items.under_skipped(&d.path) {
+            tally.skipped.fetch_add(1, Ordering::SeqCst);
+            ctx.meter.remove_total(1, 0);
+            continue;
+        }
+        ctx.items.set(&d.path, ItemState::Active, None);
+        set_current_item(Some(live.clone()));
+        let r = change(d);
+        set_current_item(None);
+        match r {
+            Ok(()) => {
+                ctx.items.set(&d.path, ItemState::Done, None);
+                ctx.meter.file_done();
+            }
+            Err(_) if live.skip.load(Ordering::SeqCst) => ctx.meter.remove_total(1, 0),
+            Err(e) if e.kind == ErrorKind::Cancelled => return Err(e),
+            Err(e) => {
+                ctx.items.set(&d.path, ItemState::Failed, Some(e.clone()));
+                ctx.fail(tally, &d.path, e);
+            }
+        }
+        ctx.progress_tick();
     }
     Ok(())
 }

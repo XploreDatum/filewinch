@@ -180,7 +180,7 @@ impl S3Remote {
 
 impl Remote for S3Remote {
     fn caps(&self) -> Caps {
-        Caps { resume_read: true, server_copy: true, ..Caps::default() }
+        Caps { resume_read: true, server_copy: true, ranged_reads: true, ..Caps::default() }
     }
 
     fn home(&self) -> Result<RPath> {
@@ -268,6 +268,15 @@ impl Remote for S3Remote {
             Err(e) => return Err(e),
         };
         crate::body::ranged_reader(resp, offset, what, self.c().host())
+    }
+
+    fn read_range(&self, path: &RPath, offset: u64, len: u64) -> Result<Box<dyn Read + Send>> {
+        self.c().check_open()?;
+        let what = format!("download {path}");
+        let (bucket, key) = need_key(path, &what)?;
+        let call = Call::new("GET", Some(bucket), key).header("range", filewinch_core::range_header(offset, len));
+        let resp = self.c().send(&call, &what)?;
+        crate::body::exact_range(resp, offset, len, what, self.c().host())
     }
 
     fn write(&self, path: &RPath, offset: u64, size: Option<u64>) -> Result<Box<dyn WriteSink>> {

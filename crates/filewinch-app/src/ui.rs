@@ -97,6 +97,16 @@ pub struct Ui {
     pub sync_io: bool,
     /// The paid licence: unregistered shows the banner (see `license_ui`).
     pub license: filewinch_license::Status,
+    /// The mounted disks and shares, for the location menu and pane headers.
+    pub volumes: crate::volumes::Volumes,
+    /// The pane location menu, while it's open.
+    pub source_menu: Option<crate::pane::source_menu::SourceMenu>,
+    /// Files this window's jobs are writing, for the panes' live rows (`pane::live`).
+    pub flights: Vec<crate::pane::live::Flight>,
+    /// The This Mac folders the panes watch for other apps' changes (`watch`).
+    pub watches: crate::watch::Watches,
+    /// The Inspector panel's state (what it shows, its previews and edits).
+    pub inspector: crate::inspector::Inspector,
     next_id: u64,
 }
 
@@ -150,6 +160,11 @@ impl Ui {
             system_dark: false,
             sync_io,
             license: crate::license_ui::initial(),
+            volumes: crate::volumes::Volumes::new(sync_io),
+            source_menu: None,
+            flights: Vec::new(),
+            watches: crate::watch::Watches::new(!sync_io),
+            inspector: crate::inspector::Inspector::new(sync_io),
             next_id: 1,
         };
         for w in warnings {
@@ -162,11 +177,14 @@ impl Ui {
         for p in &mut ui.panes {
             p.refresh(hidden);
         }
+        ui.volumes.refresh();
         ui
     }
 
     pub fn setup(&mut self, waker: Waker) {
         self.inbox.set_waker(waker.clone());
+        self.volumes.set_waker(waker.clone());
+        self.inspector.set_waker(waker.clone());
         for p in &self.panes {
             p.set_waker(waker.clone());
         }
@@ -181,9 +199,20 @@ impl Ui {
             changed = true;
         }
         let hidden = self.prefs.show_hidden;
+        let mut lost = false;
         for p in &mut self.panes {
+            let was_failed = matches!(p.listing, crate::pane::Listing::Failed(_));
             changed |= p.poll(hidden);
+            // A local folder on another volume stopped listing: it may have been unmounted.
+            lost |= !was_failed && p.volume.is_some() && p.is_local() && matches!(p.listing, crate::pane::Listing::Failed(_));
         }
+        if lost {
+            self.volumes.refresh();
+        }
+        changed |= self.volumes.poll();
+        changed |= self.inspector_poll(tx);
+        self.track_volumes();
+        changed |= self.live_poll(now, tx);
         if let Some((p, name)) = self.pending_rename.clone()
             && !self.panes[p].is_loading()
         {
@@ -303,7 +332,9 @@ impl Ui {
     }
 
     pub fn on_engine_event(&mut self, ev: Event) {
+        self.on_item_event(&ev);
         let finished = self.transfers.apply(&ev);
+        self.follow_items(&ev);
         if let Some((id, ok)) = finished {
             self.job_finished(id, ok);
         }
@@ -327,6 +358,7 @@ pub fn engine_config(p: &Prefs) -> EngineConfig {
     EngineConfig {
         max_jobs: p.max_jobs as usize,
         max_files_per_job: p.files_per_job as usize,
+        segments_per_file: p.segments_per_file as usize,
         retries: p.retries,
         bandwidth_limit: p.bandwidth_limit,
         ..EngineConfig::default()

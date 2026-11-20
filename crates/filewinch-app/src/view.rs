@@ -45,6 +45,7 @@ fn toolbar(s: &Ui, k: &Kit, paint: &Paint, inset: f32) -> El {
         // Sync needs a folder in both panes.
         .child(tool_enabled(k, "tb-sync", &icons::SYNC, "Synchronize folders", false, s.empty_pane().is_none(), |s: &mut Ui| s.open_sync()))
         .child(tool(k, "tb-transfers", &icons::TRANSFERS, "Show or hide Transfers", s.prefs.transfers_open, |s: &mut Ui| s.prefs.transfers_open = !s.prefs.transfers_open))
+        .child(tool(k, "tb-inspector", &crate::inspector::ICON, "Show or hide the Inspector", s.prefs.inspector_open, |s: &mut Ui| s.toggle_inspector()))
         .child(tool(k, "tb-settings", &icons::GEAR, crate::keys::Act::Settings.title().trim_end_matches('…'), false, |s: &mut Ui| crate::settings::open_settings(&s.prefs)));
     if crate::theme::ui_os() == filewinch_os::Os::Mac {
         return bar;
@@ -152,14 +153,16 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
     theme::follow(cx, dark);
     let k = &*theme::kit(dark);
     let paint = theme::paint(k);
+    let mut layer = Vec::new();
     let panes = row().key("panes").grow(1.0).w_full().min_h(0.0).gap(8.0).padding(8.0)
-        .child(crate::pane::bar::pane(s, 0, k, &paint, cx))
-        .child(crate::pane::bar::pane(s, 1, k, &paint, cx));
+        .child(crate::pane::bar::pane(s, 0, k, &paint, cx, &mut layer))
+        .child(crate::pane::bar::pane(s, 1, k, &paint, cx, &mut layer));
     let mut main = row().key("main").w_full().grow(1.0).min_h(0.0);
     if s.prefs.sidebar_open {
         main = main.child(crate::sidebar::view(s, k, &paint));
     }
     main = main.child(panes);
+    let main = crate::inspector::attach(s, main, k, &paint, &mut layer);
     let mut window = col().key("window").w_full().h_full().fill(paint.chrome)
         .child(toolbar(s, k, &paint, cx.titlebar_inset()))
         .child(main);
@@ -169,7 +172,6 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
     if s.prefs.transfers_open {
         window = window.child(crate::transfers::view::drawer(s, k, &paint));
     }
-    let mut layer = Vec::new();
     if let Some(n) = notices(s, k, &paint) {
         layer.push(n);
     }

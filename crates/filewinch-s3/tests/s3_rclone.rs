@@ -230,3 +230,39 @@ fn filewinch_http_from_io(e: std::io::Error) -> filewinch_core::Error {
         None => filewinch_core::Error::from(e),
     }
 }
+
+#[test]
+fn segmented_download_64mb_over_4_connections() {
+    let srv = Server::start(Kind::S3, base());
+    let bucket = srv.mkdir_bucket("seg");
+    let want = pattern(64 << 20, 5);
+    std::fs::write(bucket.join("big.bin"), &want).unwrap();
+    let r: std::sync::Arc<dyn Remote> = std::sync::Arc::from(connect(&srv));
+    let dir = filewinch_testkit::scratch_dir(base(), "s3-seg");
+    let o = filewinch_testkit::segmented::download(r, &RPath::new("/seg/big.bin"), &dir, 4);
+    assert!(matches!(o.state, filewinch_engine::JobState::Done), "{o:?}");
+    assert!(std::fs::read(dir.join("big.bin")).unwrap() == want, "bytes differ");
+    assert!(o.max_connections >= 2 && o.ranges >= 4 && o.notes.is_empty(), "{o:?}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// `cargo test --release -p filewinch-s3 --test s3_rclone -- --ignored --nocapture measure`
+#[test]
+#[ignore = "measurement; writes 512 MB of scratch"]
+fn measure_segmented_256mb() {
+    let srv = Server::start(Kind::S3, base());
+    let bucket = srv.mkdir_bucket("m");
+    std::fs::write(bucket.join("big.bin"), pattern(256 << 20, 3)).unwrap();
+    let proxy = FaultProxy::start(([127, 0, 0, 1], srv.port).into());
+    proxy.set_latency(std::time::Duration::from_millis(2));
+    let dir = filewinch_testkit::scratch_dir(base(), "s3-measure");
+    for (label, port) in [("direct", srv.port), ("2 ms per 16 KB proxy", proxy.port)] {
+        for n in [1, 3, 8] {
+            let r: std::sync::Arc<dyn Remote> = std::sync::Arc::from(connect_with(port, &srv.user, &srv.pass).unwrap());
+            let o = filewinch_testkit::segmented::download(r, &RPath::new("/m/big.bin"), &dir, n);
+            assert!(matches!(o.state, filewinch_engine::JobState::Done), "{o:?}");
+            eprintln!("MEASURE s3 {label}: {n} connection(s): {:.2} s, {:.1} MB/s (max {} at once)", o.secs, 256.0 * 1.048_576 / o.secs, o.max_connections);
+        }
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}

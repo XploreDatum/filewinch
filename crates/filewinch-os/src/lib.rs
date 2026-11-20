@@ -4,10 +4,12 @@
 //! - [`names`]: which file names Windows refuses, and the substitution downloads use for them.
 //! - [`launch`]: opening a URL in the browser, revealing a file, and opening a file in the
 //!   default app or the person's external editor.
+//! - [`volumes`]: the disks and shares mounted now, for the pane's location menu.
 
 pub mod dirs;
 pub mod launch;
 pub mod names;
+pub mod volumes;
 #[cfg(test)]
 mod tests;
 

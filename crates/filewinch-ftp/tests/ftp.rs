@@ -321,3 +321,41 @@ fn ftps_self_signed_is_host_trust_then_trusted() {
     let err = connect(&explicit, &plain.pass).err().unwrap();
     assert!(matches!(err.kind, ErrorKind::Unsupported | ErrorKind::Network), "{err}");
 }
+
+/// A 64 MB download over 4 FTP control connections (REST + RETR, ABOR at the end of each
+/// piece) lands byte-equal. A server that doesn't advertise REST in FEAT (rclone doesn't) gets
+/// no ranged reads and the engine streams over one connection, which is checked too; the
+/// ranged reads themselves (REST, then ABOR and a NOOP check mid-file) are driven directly.
+#[test]
+fn segmented_download_64mb_over_4_connections() {
+    let srv = Server::start(Kind::Ftp, base());
+    let want = data(64 << 20, 9);
+    std::fs::write(srv.root.join("big.bin"), &want).unwrap();
+    let remote: Arc<dyn Remote> = Arc::from(connect(&site(srv.port, &srv.user, Protocol::Ftp), &srv.pass).unwrap());
+    let dir = scratch_dir(base(), "ftp-seg");
+    let o = filewinch_testkit::segmented::download(remote.clone(), &RPath::new("/big.bin"), &dir, 4);
+    eprintln!("FTP segmented: ranged_reads={} {o:?}", remote.caps().ranged_reads);
+    assert!(matches!(o.state, JobState::Done), "{o:?}");
+    assert!(std::fs::read(dir.join("big.bin")).unwrap() == want, "bytes differ");
+    if remote.caps().ranged_reads {
+        assert!(o.ranges >= 4 || !o.notes.is_empty(), "segmented, or a recorded fallback: {o:?}");
+    } else {
+        assert_eq!(o.ranges, 0, "no REST: one connection");
+    }
+    // Four pieces at once, each stopped before the end of the file.
+    let mb = 1u64 << 20;
+    std::thread::scope(|s| {
+        for i in 0..4u64 {
+            let (remote, want) = (remote.clone(), &want);
+            s.spawn(move || {
+                let (off, len) = (i * 16 * mb + 12_345, 3 * mb + 7);
+                let mut got = Vec::new();
+                remote.read_range(&RPath::new("/big.bin"), off, len).unwrap().read_to_end(&mut got).unwrap();
+                assert!(got == want[off as usize..(off + len) as usize], "piece {i} differs");
+            });
+        }
+    });
+    // The pool is still healthy after the ABORs.
+    assert!(remote.list(&RPath::root()).unwrap().iter().any(|e| e.name == "big.bin"));
+    let _ = std::fs::remove_dir_all(dir);
+}

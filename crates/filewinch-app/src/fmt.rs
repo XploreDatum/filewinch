@@ -16,6 +16,7 @@ pub fn now() -> SystemTime {
 }
 
 /// Pins [`now`] to `t` (headless scenes only).
+#[cfg(any(test, feature = "dev-tools"))]
 pub fn freeze_now(t: SystemTime) {
     let secs = t.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs()).max(1);
     FROZEN.store(secs, Ordering::Relaxed);

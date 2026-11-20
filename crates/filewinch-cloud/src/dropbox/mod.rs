@@ -297,6 +297,7 @@ impl Remote for Dropbox {
             real_dirs: true,
             server_rename: true,
             server_copy: true,
+            ranged_reads: true,
         }
     }
 
@@ -368,6 +369,14 @@ impl Remote for Dropbox {
         Ok(reader)
     }
 
+    fn read_range(&self, path: &RPath, offset: u64, len: u64) -> Result<Box<dyn Read + Send>> {
+        let call = Call::post(format!("{}/files/download", self.ep.upload))
+            .header("Dropbox-API-Arg", header_arg(&json!({"path": dbx_path(path)})))
+            .header("Range", filewinch_core::range_header(offset, len))
+            .subject(path)
+            .classify(classify);
+        crate::http::ranged_body(self.s.send(call)?, offset, len, &format!("“{}”", path.name()))
+    }
     fn write(&self, path: &RPath, offset: u64, size: Option<u64>) -> Result<Box<dyn WriteSink>> {
         if offset > 0 {
             return Err(Error::unsupported("resuming uploads to Dropbox"));

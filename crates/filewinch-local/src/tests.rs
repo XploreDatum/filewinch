@@ -304,3 +304,45 @@ fn linux_exclusive_rename_never_replaces_folders_either() {
 fn scratch_root() -> PathBuf {
     std::env::temp_dir().join("filewinch-tests")
 }
+
+#[test]
+fn positional_writes_from_threads_and_keeps_bytes_when_reopened() {
+    let s = Scratch::new("positional");
+    let r = LocalRemote::new();
+    let p = s.r(".big.bin.filewinch-part");
+    let size = 3 * 1024 * 1024 + 17;
+    let want: Vec<u8> = (0..size).map(|i| (i * 31 % 251) as u8).collect();
+    let sink = r.open_positional(&p, size as u64).unwrap();
+    assert_eq!(fs::metadata(s.0.join(".big.bin.filewinch-part")).unwrap().len(), size as u64, "length set up front");
+    let third = size / 3;
+    std::thread::scope(|sc| {
+        // Only the first two thirds now; the rest after reopening.
+        for (a, b) in [(0, third), (third, 2 * third)] {
+            let (sink, want) = (&sink, &want);
+            sc.spawn(move || {
+                for at in (a..b).step_by(65_536) {
+                    let end = (at + 65_536).min(b);
+                    sink.write_at(at as u64, &want[at..end]).unwrap();
+                }
+            });
+        }
+    });
+    sink.sync().unwrap();
+    drop(sink); // abort: the bytes stay
+    let sink = r.open_positional(&p, size as u64).unwrap();
+    sink.write_at(2 * third as u64, &want[2 * third..]).unwrap();
+    sink.finish().unwrap();
+    assert_eq!(fs::read(s.0.join(".big.bin.filewinch-part")).unwrap(), want);
+}
+
+#[test]
+fn positional_refuses_a_folder_and_ranged_reads_stop_at_len() {
+    let s = Scratch::new("positional-folder");
+    let r = LocalRemote::new();
+    fs::create_dir(s.0.join("d")).unwrap();
+    assert_eq!(r.open_positional(&s.r("d"), 10).err().unwrap().kind, ErrorKind::InvalidPath);
+    fs::write(s.0.join("f"), b"0123456789").unwrap();
+    let mut out = String::new();
+    r.read_range(&s.r("f"), 3, 4).unwrap().read_to_string(&mut out).unwrap();
+    assert_eq!(out, "3456");
+}

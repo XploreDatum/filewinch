@@ -6,3 +6,5 @@ version.workspace = true
 
 [dependencies]
 filewinch-core = { workspace = true }
+filewinch-engine = { path = "../filewinch-engine" }
+filewinch-local = { workspace = true }

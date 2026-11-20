@@ -285,3 +285,17 @@ fn concurrent_use_from_several_threads() {
     }
     assert_eq!(r.list(&RPath::root()).unwrap().len(), 8);
 }
+
+#[test]
+fn segmented_download_64mb_over_4_connections() {
+    let srv = Server::start(Kind::WebDav, base());
+    let want = noise(11, 64 << 20);
+    std::fs::write(srv.root.join("big.bin"), &want).unwrap();
+    let r: std::sync::Arc<dyn Remote> = std::sync::Arc::from(connect_rclone(&srv, srv.port));
+    let dir = filewinch_testkit::scratch_dir(base(), "dav-seg");
+    let o = filewinch_testkit::segmented::download(r, &RPath::new("/big.bin"), &dir, 4);
+    assert!(matches!(o.state, filewinch_engine::JobState::Done), "{o:?}");
+    assert!(std::fs::read(dir.join("big.bin")).unwrap() == want, "bytes differ");
+    assert!(o.max_connections >= 2 && o.ranges >= 4 && o.notes.is_empty(), "{o:?}");
+    let _ = std::fs::remove_dir_all(dir);
+}

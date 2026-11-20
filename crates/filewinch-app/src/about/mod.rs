@@ -212,8 +212,10 @@ fn poll(_: &mut AboutUi, _: f64, _: &mut Tx) -> bool {
     theme::accent_changed(&SEEN)
 }
 
+#[cfg(any(test, feature = "dev-tools"))]
 type Scene = (&'static str, fn(&mut AboutUi));
 
+#[cfg(any(test, feature = "dev-tools"))]
 const SCENES: &[Scene] = &[
     ("dark", |s| s.appearance = Appearance::Dark),
     ("light", |s| s.appearance = Appearance::Light),
@@ -230,6 +232,7 @@ pub fn spec() -> AppSpec<AboutUi> {
         setup: Some(setup),
         poll: Some(poll),
         min_size: Some((420.0, 420.0)),
+        #[cfg(any(test, feature = "dev-tools"))]
         scenes: SCENES,
         ..AppSpec::new("About Filewinch", (460.0, 480.0), AboutUi::new, view)
     };

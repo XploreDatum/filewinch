@@ -229,7 +229,7 @@ fn usable(rel: &str) -> bool {
 
 impl Remote for AzureRemote {
     fn caps(&self) -> Caps {
-        Caps { resume_read: true, real_dirs: false, server_copy: true, ..Caps::default() }
+        Caps { resume_read: true, real_dirs: false, server_copy: true, ranged_reads: true, ..Caps::default() }
     }
 
     fn home(&self) -> Result<RPath> {
@@ -307,6 +307,20 @@ impl Remote for AzureRemote {
             left,
             host: self.c.cfg.host.clone(),
         }))
+    }
+
+    fn read_range(&self, path: &RPath, offset: u64, len: u64) -> Result<Box<dyn Read + Send>> {
+        let what = format!("download {}", quoted(path));
+        let Loc::Blob(c, k) = self.loc(path)? else {
+            return Err(Error::new(ErrorKind::InvalidPath, format!("Couldn't {what}: it's a folder.")));
+        };
+        let call = Call::new("GET", Some(&c), Some(&k)).h("x-ms-range", filewinch_core::range_header(offset, len));
+        let resp = self.c.ok(self.c.send_raw(&call, &[])?, &what)?;
+        let status = resp.status().as_u16();
+        let n = filewinch_core::check_range_reply(status, header(&resp, "content-range").as_deref(), offset, len)?;
+        let left = header(&resp, "content-length").and_then(|v| v.parse().ok());
+        let body = Download { inner: filewinch_http::body_reader(resp), left, host: self.c.cfg.host.clone() };
+        Ok(filewinch_core::exact_reader(Box::new(body), n, &quoted(path)))
     }
 
     fn write(&self, path: &RPath, offset: u64, size: Option<u64>) -> Result<Box<dyn WriteSink>> {

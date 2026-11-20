@@ -40,6 +40,18 @@ pub(crate) fn ranged_reader(resp: Response<Body>, offset: u64, what: String, hos
     Ok(Box::new(reader))
 }
 
+/// Turns a successful GET sent with `filewinch_core::range_header(offset, len)` into a reader
+/// of exactly that range. A reply that isn't that range (a 200 with the whole object) is
+/// `Error::range_ignored`, so the engine falls back instead of storing the wrong bytes.
+pub(crate) fn exact_range(resp: Response<Body>, offset: u64, len: u64, what: String, host: String) -> Result<Box<dyn Read + Send>> {
+    let status = resp.status().as_u16();
+    let n = filewinch_core::check_range_reply(status, header(&resp, "content-range"), offset, len)?;
+    let left = header(&resp, "content-length").and_then(|v| v.trim().parse::<u64>().ok());
+    let label = what.trim_start_matches("download ").to_owned();
+    let reader = BodyReader { inner: filewinch_http::body_reader(resp), left, what, host };
+    Ok(filewinch_core::exact_reader(Box::new(reader), n, &label))
+}
+
 /// Maps read failures to core errors (inside `io::Error`, see `filewinch_http::to_io`) and
 /// treats a body that ends before its Content-Length as a dropped connection.
 struct BodyReader {

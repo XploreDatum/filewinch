@@ -10,13 +10,15 @@
 //! Writes that replace an existing file go through a hidden sibling and are renamed into
 //! place on `finish`, so a cancelled or failed overwrite leaves the old file untouched; a new
 //! file is written in place, so a failed download leaves its partial bytes for the engine to
-//! resume.
+//! resume. [`Remote::open_positional`] gives segmented downloads a file they fill in pieces
+//! from several threads (`pwrite`/`seek_write`), with its space reserved up front.
 //!
 //! Unix mode bits, owners and groups are reported on macOS and Linux only. Symbolic links are
 //! listed on every OS; on Windows an item with the hidden attribute carries [`HIDDEN_EXTRA`]
 //! (see [`is_hidden`]).
 
 mod fsx;
+mod positional;
 mod sink;
 #[cfg(test)]
 mod tests;
@@ -43,7 +45,7 @@ use std::time::SystemTime;
 use std::sync::Arc;
 
 use filewinch_core::{
-    Caps, Connector, Entry, Error, ErrorKind, Protocol, RPath, Remote, Result, Secrets, Site, WriteSink,
+    Caps, Connector, Entry, Error, ErrorKind, PositionalSink, Protocol, RPath, Remote, Result, Secrets, Site, WriteSink,
 };
 
 pub use fsx::io_error;
@@ -159,6 +161,7 @@ impl Remote for LocalRemote {
             real_dirs: true,
             server_rename: true,
             server_copy: true,
+            ranged_reads: false,
         }
     }
 
@@ -229,6 +232,11 @@ impl Remote for LocalRemote {
             note_created(path);
         }
         Ok(Box::new(sink))
+    }
+
+    fn open_positional(&self, path: &RPath, size: u64) -> Result<Box<dyn PositionalSink>> {
+        self.open()?;
+        Ok(Box::new(positional::LocalPositional::open(&changeable(path, "write")?, size)?))
     }
 
     fn mkdir(&self, path: &RPath) -> Result<()> {

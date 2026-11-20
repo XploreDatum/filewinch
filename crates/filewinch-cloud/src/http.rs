@@ -81,6 +81,14 @@ pub(crate) fn retry_after(headers: &HeaderMap) -> Option<Duration> {
     )
 }
 
+/// The body of a successful GET sent with `filewinch_core::range_header(offset, len)`, as
+/// exactly that range; anything else (a 200 with the whole file) is `Error::range_ignored`.
+pub(crate) fn ranged_body(resp: Response, offset: u64, len: u64, what: &str) -> Result<Box<dyn std::io::Read + Send>> {
+    let status = resp.status().as_u16();
+    let n = filewinch_core::check_range_reply(status, header(&resp, "content-range").as_deref(), offset, len)?;
+    Ok(filewinch_core::exact_reader(Box::new(resp.into_body().into_reader()), n, what))
+}
+
 pub(crate) fn header(resp: &Response, name: &str) -> Option<String> {
     resp.headers()
         .get(name)

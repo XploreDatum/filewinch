@@ -50,6 +50,13 @@ fn is_dirish(e: &Entry) -> bool {
     e.kind == EntryKind::Dir
 }
 
+/// A file Filewinch itself writes while a transfer runs, never shown even with hidden files on:
+/// a segmented download's `.name.filewinch-part` (and its `-ranges`, `-old` siblings) and the
+/// local backend's `.name.filewinch-<pid>-<n>` stand-in for a file being replaced.
+pub fn is_transfer_temp(name: &str) -> bool {
+    name.starts_with('.') && name.contains(".filewinch-")
+}
+
 /// The visible rows' indexes into `entries`, filtered and sorted. Folders come first whichever
 /// way a column sorts.
 pub fn arrange(entries: &[Entry], sort: Sort, filter: &str, show_hidden: bool) -> Vec<u32> {
@@ -57,7 +64,9 @@ pub fn arrange(entries: &[Entry], sort: Sort, filter: &str, show_hidden: bool) -
     let mut rows: Vec<u32> = (0..entries.len() as u32)
         .filter(|&i| {
             let e = &entries[i as usize];
-            (show_hidden || !filewinch_local::is_hidden(e)) && (needle.is_empty() || e.name.to_lowercase().contains(&needle))
+            !is_transfer_temp(&e.name)
+                && (show_hidden || !filewinch_local::is_hidden(e))
+                && (needle.is_empty() || e.name.to_lowercase().contains(&needle))
         })
         .collect();
     let kinds: Vec<String> = if sort.key == SortKey::Kind {

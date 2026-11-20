@@ -332,3 +332,54 @@ fn servers_that_arent_webdav() {
     let err = connect_mock(plain, "x").err().unwrap();
     assert_eq!(err.kind, ErrorKind::Unsupported, "{err}");
 }
+
+/// Segmented downloads' ranged reads: a 206 with the right Content-Range gives exactly the
+/// range; a server that ignores Range (200), a wrong range, a 416 and a short body are typed
+/// errors, never wrong bytes.
+#[test]
+fn read_range_needs_the_exact_partial_reply() {
+    let data: Vec<u8> = (0..5000u32).map(|i| (i % 251) as u8).collect();
+    let d = data.clone();
+    let port = mock(move |req, r| {
+        let _ = read_body(req, r);
+        let range = req.header("range").and_then(|h| h.strip_prefix("bytes=")).map(|h| {
+            let (a, b) = h.split_once('-').unwrap();
+            (a.parse::<usize>().unwrap(), b.parse::<usize>().unwrap())
+        });
+        match (req.method.as_str(), req.path.as_str(), range) {
+            ("PROPFIND", _, _) => propfind_ok(&[("/", true, 0)]),
+            ("GET", "/ranged.bin", Some((a, b))) => {
+                let b = b.min(d.len() - 1);
+                let cr = format!("bytes {a}-{b}/{}", d.len());
+                Reply::Send(resp("206 Partial Content", &[("Content-Range", &cr)], &d[a..=b]))
+            }
+            ("GET", "/plain.bin", _) => Reply::Send(resp("200 OK", &[], &d)),
+            ("GET", "/wrong.bin", _) => Reply::Send(resp("206 Partial Content", &[("Content-Range", "bytes 0-99/5000")], &d[..100])),
+            ("GET", "/end.bin", _) => Reply::Send(resp("416 Range Not Satisfiable", &[("Content-Range", "bytes */5000")], b"")),
+            ("GET", "/short.bin", Some((a, b))) => {
+                let mut bytes = format!("HTTP/1.1 206 Partial Content\r\nContent-Range: bytes {a}-{b}/5000\r\nContent-Length: {}\r\n\r\n", b - a + 1).into_bytes();
+                bytes.extend_from_slice(&d[a..a + 10]);
+                Reply::SendAndClose(bytes)
+            }
+            _ => Reply::Send(resp("404 Not Found", &[], b"")),
+        }
+    });
+    let r = connect_mock(port, "x").unwrap();
+    let mut out = Vec::new();
+    r.read_range(&RPath::new("/ranged.bin"), 1000, 1500).unwrap().read_to_end(&mut out).unwrap();
+    assert_eq!(out, data[1000..2500]);
+    out.clear();
+    // The last piece: the server trims the range at the end of the file.
+    r.read_range(&RPath::new("/ranged.bin"), 4900, 500).unwrap().read_to_end(&mut out).unwrap();
+    assert_eq!(out, data[4900..]);
+
+    for p in ["/plain.bin", "/wrong.bin"] {
+        let e = r.read_range(&RPath::new(p), 100, 100).err().unwrap();
+        assert_eq!(e.kind, ErrorKind::Unsupported, "{p}: {e}");
+        assert!(e.message.contains("whole file"), "{p}: {e}");
+    }
+    assert_eq!(r.read_range(&RPath::new("/end.bin"), 6000, 10).err().unwrap().kind, ErrorKind::InvalidPath);
+    out.clear();
+    let err = r.read_range(&RPath::new("/short.bin"), 100, 100).unwrap().read_to_end(&mut out).unwrap_err();
+    assert_eq!(filewinch_core::Error::from(err).kind, ErrorKind::Network);
+}

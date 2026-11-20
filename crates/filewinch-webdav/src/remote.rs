@@ -137,6 +137,7 @@ impl Remote for WebDavRemote {
             real_dirs: true,
             server_rename: true,
             server_copy: true,
+            ranged_reads: true,
         }
     }
 
@@ -166,6 +167,10 @@ impl Remote for WebDavRemote {
 
     fn read(&self, path: &RPath, offset: u64) -> Result<Box<dyn Read + Send>> {
         transfer::open_read(&self.client, path, offset)
+    }
+
+    fn read_range(&self, path: &RPath, offset: u64, len: u64) -> Result<Box<dyn Read + Send>> {
+        transfer::open_range(&self.client, path, offset, len)
     }
 
     fn write(&self, path: &RPath, offset: u64, size: Option<u64>) -> Result<Box<dyn WriteSink>> {

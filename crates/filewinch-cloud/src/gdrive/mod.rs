@@ -205,6 +205,7 @@ impl Remote for GDrive {
             real_dirs: true,
             server_rename: true,
             server_copy: true,
+            ranged_reads: true,
         }
     }
 
@@ -289,6 +290,19 @@ impl Remote for GDrive {
         Ok(reader)
     }
 
+    fn read_range(&self, path: &RPath, offset: u64, len: u64) -> Result<Box<dyn Read + Send>> {
+        let item = self.file_item(path)?;
+        if item.export.is_some() {
+            return Err(Error::range_ignored("Google Docs exports can't be read in parts"));
+        }
+        let call = Call::get(format!("{}/{}", self.files(), item.id))
+            .query("alt", "media")
+            .query("supportsAllDrives", "true")
+            .header("Range", filewinch_core::range_header(offset, len))
+            .subject(path)
+            .classify(classify);
+        crate::http::ranged_body(self.s.send(call)?, offset, len, &format!("“{}”", path.name()))
+    }
     fn write(&self, path: &RPath, offset: u64, size: Option<u64>) -> Result<Box<dyn WriteSink>> {
         if offset > 0 {
             return Err(Error::unsupported("resuming uploads to Google Drive"));

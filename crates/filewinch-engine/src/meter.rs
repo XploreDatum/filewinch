@@ -39,6 +39,13 @@ impl Meter {
         s.bytes_total += bytes;
     }
 
+    /// Takes a skipped file back out of the totals.
+    pub fn remove_total(&self, files: u64, bytes: u64) {
+        let mut s = self.lock();
+        s.files_total = s.files_total.saturating_sub(files);
+        s.bytes_total = s.bytes_total.saturating_sub(bytes);
+    }
+
     pub fn scan_done(&self) {
         self.lock().scanned = true;
     }
@@ -79,6 +86,8 @@ impl Meter {
             files_done: s.files_done,
             files_total: s.scanned.then_some(s.files_total.max(s.files_done)),
             current: s.current.clone(),
+            files_found: s.files_total.max(s.files_done),
+            bytes_found: s.bytes_total.max(s.bytes_done),
             bytes_per_sec: s.speed,
             eta,
         }

@@ -17,7 +17,7 @@ filewinch-os = { path = "crates/filewinch-os" }
 # Rune, pinned to a `dev` revision ("Pin a rev of `dev`; `dev` is never rewritten").
 # To update: pick the new rev, check Rune's root Cargo.toml `[patch.crates-io]` at that rev, and
 # use the same rev here and for every patch below.
-rune = { git = "https://github.com/anomalyco/rune", rev = "762ab46d3c51b167aff0d52fe556881549ac2cee", default-features = true }
+rune = { git = "https://github.com/anomalyco/rune", rev = "762ab46d3c51b167aff0d52fe556881549ac2cee", default-features = false }
 rune-kit = { git = "https://github.com/anomalyco/rune", rev = "762ab46d3c51b167aff0d52fe556881549ac2cee" }
 rune-mac = { git = "https://github.com/anomalyco/rune", rev = "762ab46d3c51b167aff0d52fe556881549ac2cee" }
 serde = { version = "1", features = ["derive"] }
@@ -40,3 +40,21 @@ debug = "line-tables-only"
 
 [profile.dev.package."*"]
 debug = false
+
+# Release builds ship lean (one optimised codegen unit, whole-program LTO, no symbols in the binary)
+# but keep their symbols for crash reports: line tables are built, split out before stripping
+# (macOS: rustc runs dsymutil into filewinch.dSYM, then strips; Linux: filewinch.dwp) and the
+# packaging scripts keep them beside dist/, never in the app, DMG, tarball or AppImage.
+# Windows sets CARGO_PROFILE_RELEASE_STRIP=none (package-windows.ps1) so the linker still writes
+# filewinch.pdb; the .exe never holds debug info, only the PDB's id.
+# panic stays "unwind": a panic ends only its own thread (an engine or backend worker), and the
+# engine, cloud and FTP code recover the locks it poisoned (`unwrap_or_else(|e| e.into_inner())`);
+# "abort" would turn any worker panic into the whole app quitting mid-transfer.
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+debug = "line-tables-only"
+split-debuginfo = "packed"
+strip = "symbols"
+panic = "unwind"

@@ -54,6 +54,23 @@ pub(crate) fn open_read(client: &Client, path: &RPath, offset: u64) -> Result<Bo
     }
 }
 
+/// `len` bytes of `path` from `offset`, for segmented downloads. Unlike [`open_read`], a
+/// server that ignores `Range` is an error ([`Error::range_ignored`]), never a skip.
+pub(crate) fn open_range(client: &Client, path: &RPath, offset: u64, len: u64) -> Result<Box<dyn Read + Send>> {
+    let what = format!("download {}", path.name());
+    let rp = client.target.request_path(path, false);
+    let range = filewinch_core::range_header(offset, len);
+    let resp = client.send("GET", &rp, &[("range", &range)], "")?;
+    let status = resp.status().as_u16();
+    if !(200..300).contains(&status) {
+        return Err(client.fail(resp, &what));
+    }
+    let cr = resp.headers().get("content-range").and_then(|v| v.to_str().ok());
+    let n = filewinch_core::check_range_reply(status, cr, offset, len)?;
+    let host = client.target.host_name().to_string();
+    Ok(filewinch_core::exact_reader(Box::new(DavReader::new(resp, host)), n, &format!("“{}”", path.name())))
+}
+
 fn shorter_than(what: &str, offset: u64) -> Error {
     Error::new(
         ErrorKind::InvalidPath,

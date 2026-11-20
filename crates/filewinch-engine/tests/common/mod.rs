@@ -3,12 +3,12 @@
 
 #![allow(dead_code)]
 
-use filewinch_core::{Caps, Entry, EntryKind, Error, ErrorKind, RPath, Remote, Result, WriteSink};
+use filewinch_core::{Caps, Checksum, Entry, EntryKind, Error, ErrorKind, PositionalSink, RPath, Remote, Result, WriteSink};
 use filewinch_engine::{Engine, EngineConfig, Event, JobId, JobState};
 use std::collections::{BTreeMap, VecDeque};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
@@ -37,6 +37,12 @@ pub struct Mem {
     /// Refuse writes at an offset with Unsupported despite advertising resume_write
     /// (like servers that can't seek on upload).
     pub refuse_offset_writes: std::sync::atomic::AtomicBool,
+    /// Checksums `list`/`stat` report per file.
+    pub checksums: Mutex<BTreeMap<RPath, Vec<Checksum>>>,
+    /// Supports `open_positional` (like the local disk).
+    pub positional: AtomicBool,
+    /// Bytes handed out by readers (read and read_range).
+    pub served: AtomicU64,
 }
 
 pub fn full_caps() -> Caps {
@@ -49,6 +55,7 @@ pub fn full_caps() -> Caps {
         real_dirs: true,
         server_rename: true,
         server_copy: false,
+        ranged_reads: false,
     }
 }
 
@@ -67,6 +74,9 @@ impl Mem {
             renames: AtomicUsize::new(0),
             deny: Mutex::new(Vec::new()),
             refuse_offset_writes: std::sync::atomic::AtomicBool::new(false),
+            checksums: Mutex::new(BTreeMap::new()),
+            positional: AtomicBool::new(false),
+            served: AtomicU64::new(0),
         })
     }
 
@@ -178,6 +188,7 @@ impl Read for MemReader {
         let n = buf.len().min(self.mem.read_chunk).min(self.data.len() - self.pos);
         buf[..n].copy_from_slice(&self.data[self.pos..self.pos + n]);
         self.pos += n;
+        self.mem.served.fetch_add(n as u64, Ordering::SeqCst);
         Ok(n)
     }
 }
@@ -226,9 +237,41 @@ impl Drop for MemSink {
     }
 }
 
+struct MemPositional {
+    mem: Arc<Mem>,
+    path: RPath,
+}
+
+impl PositionalSink for MemPositional {
+    fn write_at(&self, offset: u64, buf: &[u8]) -> Result<()> {
+        match self.mem.nodes.lock().unwrap().get_mut(&self.path) {
+            Some(Node::File { data, .. }) => {
+                let a = offset as usize;
+                assert!(a + buf.len() <= data.len(), "positional write past the preallocated size");
+                data[a..a + buf.len()].copy_from_slice(buf);
+                Ok(())
+            }
+            _ => Err(not_found(&self.path)),
+        }
+    }
+    fn finish(self: Box<Self>) -> Result<()> {
+        Ok(())
+    }
+}
+
 /// `Remote` for `Arc<Mem>` via a newtype so readers can hold an `Arc` back to the store.
 #[derive(Clone)]
 pub struct MemRemote(pub Arc<Mem>);
+
+impl MemRemote {
+    fn entry(&self, p: &RPath, n: &Node) -> Entry {
+        let mut e = Mem::entry(p, n);
+        if let Some(c) = self.0.checksums.lock().unwrap().get(p) {
+            e.checksums = c.clone();
+        }
+        e
+    }
+}
 
 impl Remote for MemRemote {
     fn caps(&self) -> Caps {
@@ -244,11 +287,42 @@ impl Remote for MemRemote {
             Some(_) => return Err(Error::new(ErrorKind::InvalidPath, "not a folder")),
             None => return Err(not_found(dir)),
         }
-        Ok(n.iter().filter(|(p, _)| p.parent().as_ref() == Some(dir)).map(|(p, x)| Mem::entry(p, x)).collect())
+        Ok(n.iter().filter(|(p, _)| p.parent().as_ref() == Some(dir)).map(|(p, x)| self.entry(p, x)).collect())
     }
     fn stat(&self, path: &RPath) -> Result<Entry> {
         let n = self.0.nodes.lock().unwrap();
-        n.get(path).map(|x| Mem::entry(path, x)).ok_or_else(|| not_found(path))
+        n.get(path).map(|x| self.entry(path, x)).ok_or_else(|| not_found(path))
+    }
+    fn read_range(&self, path: &RPath, offset: u64, len: u64) -> Result<Box<dyn Read + Send>> {
+        // Copies only the range (a whole-file copy per segment would be wasteful in tests).
+        let data = match self.0.nodes.lock().unwrap().get(path) {
+            Some(Node::File { data, .. }) => {
+                let a = (offset as usize).min(data.len());
+                data[a..(a + len as usize).min(data.len())].to_vec()
+            }
+            Some(Node::Dir) => return Err(Error::new(ErrorKind::InvalidPath, "is a folder")),
+            None => return Err(not_found(path)),
+        };
+        let now = self.0.open_readers.fetch_add(1, Ordering::SeqCst) + 1;
+        self.0.max_open_readers.fetch_max(now, Ordering::SeqCst);
+        Ok(Box::new(MemReader { mem: self.0.clone(), data, pos: 0 }))
+    }
+    fn open_positional(&self, path: &RPath, size: u64) -> Result<Box<dyn PositionalSink>> {
+        if !self.0.positional.load(Ordering::SeqCst) {
+            return Err(Error::unsupported("positional writes"));
+        }
+        let mut n = self.0.nodes.lock().unwrap();
+        if !matches!(path.parent().and_then(|p| n.get(&p).cloned()), Some(Node::Dir)) {
+            return Err(not_found(path));
+        }
+        match n.get_mut(path) {
+            Some(Node::Dir) => return Err(Error::new(ErrorKind::InvalidPath, "is a folder")),
+            Some(Node::File { data, .. }) => data.resize(size as usize, 0),
+            None => {
+                n.insert(path.clone(), Node::File { data: vec![0; size as usize], mtime: SystemTime::now(), mode: 0o644 });
+            }
+        }
+        Ok(Box::new(MemPositional { mem: self.0.clone(), path: path.clone() }))
     }
     fn read(&self, path: &RPath, offset: u64) -> Result<Box<dyn Read + Send>> {
         if self.0.deny.lock().unwrap().contains(path) {
@@ -637,6 +711,7 @@ pub fn cfg() -> EngineConfig {
         chunk: 16 * 1024,
         bandwidth_limit: None,
         retry_delay: Duration::from_millis(10),
+        segments_per_file: 3,
     }
 }
 

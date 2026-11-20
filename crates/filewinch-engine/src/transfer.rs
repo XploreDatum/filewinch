@@ -2,6 +2,7 @@
 //! delete for a Move.
 
 use crate::runner::{Item, JobCtx, Outcome};
+use crate::segment::{self, Landed};
 use crate::{ConflictAsk, ConflictChoice, ConflictPolicy, Event, Op};
 use filewinch_core::{Entry, EntryKind, Error, ErrorKind, RPath, Remote, Result};
 use std::io::{self, Read, Write};
@@ -13,7 +14,7 @@ fn io_error(e: io::Error) -> Error {
     Error::from(e)
 }
 
-enum Plan {
+pub(crate) enum Plan {
     Write { target: RPath, offset: u64 },
     Skip,
 }
@@ -29,7 +30,8 @@ pub(crate) fn file(ctx: &JobCtx, item: &Item) -> Result<Outcome> {
         Err(e) if e.kind == ErrorKind::NotFound => None,
         Err(e) => return Err(e),
     };
-    let (target, offset) = match existing {
+    let replacing = existing.is_some();
+    let (mut target, offset) = match existing {
         None => (item.dst.clone(), 0),
         Some(d) => match resolve(ctx, item, &d)? {
             Plan::Skip => return Ok(Outcome::Skipped),
@@ -51,15 +53,32 @@ pub(crate) fn file(ctx: &JobCtx, item: &Item) -> Result<Outcome> {
             ctx.retrying(|| dst.remove_file(&target))?;
         }
         ctx.retrying(|| dst.rename(src_path, &target))?;
-        ctx.meter.add_bytes(size);
+        ctx.add_bytes(size);
         return Ok(Outcome::Done);
     }
 
     if same && scaps.server_copy {
         ctx.retrying(|| dst.copy(src_path, &target))?;
-        ctx.meter.add_bytes(size);
+        ctx.add_bytes(size);
     } else {
-        stream_with_retries(ctx, &item.src, &target, offset)?;
+        let landed = match segment::connections(ctx, &item.src, &target, offset) {
+            Some(n) => segment::download(ctx, item, &target, n, replacing && target == item.dst)?,
+            None => Landed::NotSegmented,
+        };
+        match landed {
+            Landed::At(t) => target = t,
+            Landed::Skipped => return Ok(Outcome::Skipped),
+            Landed::NotSegmented => {
+                if let Err(e) = stream_with_retries(ctx, &item.src, &target, offset) {
+                    if ctx.item_skipped() && !replacing {
+                        // Skipped by the person: a new file's partial bytes go too. (An
+                        // overwrite was writing a hidden sibling, already gone.)
+                        let _ = dst.remove_file(&target);
+                    }
+                    return Err(e);
+                }
+            }
+        }
     }
     set_metadata(ctx, &item.src, &target);
 
@@ -83,7 +102,7 @@ fn can_resume(ctx: &JobCtx, src: &Entry, dst: &Entry) -> bool {
         && matches!((dst.size, src.size), (Some(ds), Some(ss)) if ds > 0 && ds < ss)
 }
 
-fn resolve(ctx: &JobCtx, item: &Item, d: &Entry) -> Result<Plan> {
+pub(crate) fn resolve(ctx: &JobCtx, item: &Item, d: &Entry) -> Result<Plan> {
     let resumable = can_resume(ctx, &item.src, d);
     let choice = match ctx.job.conflict {
         ConflictPolicy::Overwrite => ConflictChoice::Overwrite,
@@ -163,7 +182,7 @@ fn stream_with_retries(ctx: &JobCtx, src: &Entry, target: &RPath, start: u64) ->
     let dst = ctx.job.dst.as_deref().expect("transfer has a destination");
     let mut resumable = ctx.src().caps().resume_read && dst.caps().resume_write;
     let mut offset = start;
-    ctx.meter.add_bytes(offset);
+    ctx.add_bytes(offset);
     let mut attempt = 0;
     loop {
         let mut counted = 0u64;
@@ -175,17 +194,17 @@ fn stream_with_retries(ctx: &JobCtx, src: &Entry, target: &RPath, start: u64) ->
             // The server can't continue this particular file after all (some servers refuse
             // writes at an offset): start it over, once, without resuming.
             resumable = false;
-            ctx.meter.sub_bytes(offset + counted);
+            ctx.sub_bytes(offset + counted);
             offset = 0;
             continue;
         }
         if !err.kind.is_transient() || attempt >= ctx.cfg.retries {
-            ctx.meter.sub_bytes(offset + counted);
+            ctx.sub_bytes(offset + counted);
             return Err(err);
         }
         attempt += 1;
         if let Err(e) = ctx.backoff(attempt, &err) {
-            ctx.meter.sub_bytes(offset + counted);
+            ctx.sub_bytes(offset + counted);
             return Err(e);
         }
         let reached = offset + counted;
@@ -198,20 +217,20 @@ fn stream_with_retries(ctx: &JobCtx, src: &Entry, target: &RPath, start: u64) ->
         } else {
             0
         };
-        ctx.meter.sub_bytes(reached - next);
+        ctx.sub_bytes(reached - next);
         offset = next;
     }
 }
 
 fn stream(ctx: &JobCtx, src: &Entry, target: &RPath, offset: u64, counted: &mut u64) -> Result<()> {
     let dst = ctx.job.dst.as_deref().expect("transfer has a destination");
-    ctx.ctl.checkpoint()?;
+    ctx.checkpoint()?;
     let mut reader = ctx.src().read(&src.path, offset)?;
     let mut sink = dst.write(target, offset, src.size)?;
     let mut buf = vec![0u8; ctx.cfg.chunk.max(4096)];
     loop {
         // A pause or cancel takes effect here; cancel drops `sink` unfinished, which aborts it.
-        ctx.ctl.checkpoint()?;
+        ctx.checkpoint()?;
         let n = match reader.read(&mut buf) {
             Ok(0) => break,
             Ok(n) => n,
@@ -221,10 +240,10 @@ fn stream(ctx: &JobCtx, src: &Entry, target: &RPath, offset: u64, counted: &mut 
         ctx.inner.bucket.take(n, &ctx.ctl)?;
         sink.write_all(&buf[..n]).map_err(io_error)?;
         *counted += n as u64;
-        ctx.meter.add_bytes(n as u64);
+        ctx.add_bytes(n as u64);
         ctx.progress_tick();
     }
-    ctx.ctl.checkpoint()?;
+    ctx.checkpoint()?;
     sink.finish()
 }
 

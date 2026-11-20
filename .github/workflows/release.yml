@@ -108,8 +108,13 @@ jobs:
           targets: ${{ env.TARGET }}
           cache-key: release
 
+      # The release profile strips symbols, which on MSVC means no PDB; "none" here keeps the exe
+      # free of debug info but has the linker write filewinch.pdb beside it (package-windows.ps1).
       - name: build
-        run: cargo build --release --locked -p filewinch-app --target $env:TARGET
+        env:
+          CARGO_PROFILE_RELEASE_STRIP: none
+        # Every backend, without the dev tools (headless snapshots, scenes, demo data).
+        run: cargo build --release --locked -p filewinch-app --target $env:TARGET --no-default-features --features backends
 
       - name: sign Filewinch.exe
         if: steps.signing.outputs.enabled == 'true'
@@ -183,11 +188,19 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: windows-x64
+          name: release-windows-x64
           path: |
             dist/windows/*.zip
             dist/windows/*.msi
           if-no-files-found: error
+
+      # Crash-report symbols: a workflow artifact only (never on the release), kept 90 days.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: symbols-windows-x64-${{ needs.meta.outputs.version }}
+          path: dist/windows/symbols/
+          if-no-files-found: error
+          retention-days: 90
 
   linux:
     name: Linux ${{ matrix.arch }}
@@ -238,10 +251,14 @@ jobs:
             [ -s "$f" ] || { echo "::error::$f is missing"; exit 1; }
           done
           file target/release/filewinch
+          # Stripped (Cargo.toml's release profile): no symbol table or debug sections shipped.
+          if readelf -S target/release/filewinch | grep -qE '\.(symtab|debug_)'; then
+            echo "::error::target/release/filewinch isn't stripped"; exit 1
+          fi
 
       - uses: actions/upload-artifact@v7
         with:
-          name: linux-${{ matrix.arch }}
+          name: release-linux-${{ matrix.arch }}
           path: |
             dist/linux/*.tar.gz
             dist/linux/*.AppImage
@@ -267,15 +284,20 @@ jobs:
           ref: ${{ env.TAG }}
           persist-credentials: false
 
+      # Only the release-* artifacts: the symbols-* ones stay private to the workflow run.
       - uses: actions/download-artifact@v8
         with:
           path: out
+          pattern: release-*
           merge-multiple: true
 
       - name: SHA256SUMS
         run: |
           cd out
           ls -l
+          for f in *; do
+            case "${f,,}" in *.pdb|*.dwp|*.dsym|*.debug) echo "::error::debug symbols in the release files: $f"; exit 1 ;; esac
+          done
           sha256sum -- * > ../SHA256SUMS.ci
           cd ..
           # A re-run keeps lines for files CI didn't make (the Mac .dmg uploaded from a Mac).

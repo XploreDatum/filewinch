@@ -192,6 +192,7 @@ impl Ui {
             }
             Act::Transfers => self.prefs.transfers_open = !self.prefs.transfers_open,
             Act::Sidebar => self.prefs.sidebar_open = !self.prefs.sidebar_open,
+            Act::Inspector => self.toggle_inspector(),
             Act::Back => self.go_back(p),
             Act::Forward => self.go_forward(p),
             Act::Up => self.go_up(p),
@@ -227,6 +228,7 @@ impl Ui {
             .item(PopupItem::new("reset-columns", "Reset Columns"))
             .item(a(Act::Transfers).checked(self.prefs.transfers_open))
             .item(a(Act::Sidebar).checked(self.prefs.sidebar_open))
+            .item(item("act:Inspector", if self.prefs.inspector_open { "Hide Inspector" } else { "Show Inspector" }, Some(Act::Inspector)))
             .separator()
             .item(a(Act::Back))
             .item(a(Act::Forward))
@@ -304,6 +306,7 @@ pub fn menu_bar() -> Vec<MenuItem<Ui>> {
         }),
         mk("View", Act::Transfers, |s, tx| s.act(Act::Transfers, tx)),
         mk("View", Act::Sidebar, |s, tx| s.act(Act::Sidebar, tx)),
+        mk("View", Act::Inspector, |s, tx| s.act(Act::Inspector, tx)),
         mk("Go", Act::Back, |s, tx| s.act(Act::Back, tx)),
         mk("Go", Act::Forward, |s, tx| s.act(Act::Forward, tx)),
         mk("Go", Act::Up, |s, tx| s.act(Act::Up, tx)),

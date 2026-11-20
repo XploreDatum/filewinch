@@ -15,7 +15,7 @@ use crate::connect::form::{AuthChoice, Form};
 use crate::fake::{FakeRemote, scene_now};
 use crate::pane::Source;
 use crate::sync_sheet::Phase;
-use crate::transfers::engine::{ConflictAsk, JobState, Progress, SyncAction, SyncActionKind, SyncConflict, SyncPlan};
+use crate::transfers::engine::{ActivePhase, ConflictAsk, ItemCounts, ItemState, ItemView, JobState, Progress, SyncAction, SyncActionKind, SyncConflict, SyncPlan};
 use crate::transfers::model::{Direction, Row};
 use crate::ui::{Session, Sheet, Ui};
 
@@ -33,6 +33,8 @@ pub const SCENES: &[Scene] = &[
     ("connect-swift", connect_swift),
     ("transfers", transfers),
     ("transfers-dark", transfers_dark),
+    ("transfers-folder", transfers_folder),
+    ("transfers-folder-dark", transfers_folder_dark),
     ("info", info),
     ("sync", sync),
     ("trust", trust),
@@ -45,6 +47,18 @@ pub const SCENES: &[Scene] = &[
     ("banner", banner),
     ("license-sheet", license_sheet),
     ("license-sheet-limit", license_sheet_limit),
+    ("source-menu-volumes", source_menu_volumes),
+    ("downloading", downloading),
+    ("downloading-dark", downloading_dark),
+    ("connect-saved", connect_saved),
+    ("connect-saved-many", connect_saved_many),
+    // The Inspector's scenes live with it (`inspector/scenes.rs`).
+    ("inspector-file", crate::inspector::scenes::file),
+    ("inspector-image", crate::inspector::scenes::image),
+    ("inspector-multi", crate::inspector::scenes::multi),
+    ("inspector-remote", crate::inspector::scenes::remote),
+    ("inspector-perms-staged", crate::inspector::scenes::perms_staged),
+    ("inspector-folder-enclosed", crate::inspector::scenes::folder_enclosed),
 ];
 
 const SITE: &str = "/Users/alex/Projects/acme-site";
@@ -210,14 +224,19 @@ fn job(id: u64, label: &str, direction: Direction, state: JobState, j: Job) -> R
             files_done: j.files.0,
             files_total: Some(j.files.1),
             current: j.current.map(RPath::new),
+            files_found: j.files.1,
+            bytes_found: j.total,
             bytes_per_sec: j.speed,
-            eta: (j.speed > 0.0).then(|| Duration::from_secs(((j.total - j.done) as f64 / j.speed) as u64)),
+            eta: (j.speed > 0.0).then(|| Duration::from_secs((j.total.saturating_sub(j.done) as f64 / j.speed) as u64)),
         },
         failures: Vec::new(),
         expanded: false,
         question: None,
         apply_to_all: false,
         reveal: None,
+        files_at_once: 3,
+        dest: String::new(),
+        items: Default::default(),
     }
 }
 
@@ -251,6 +270,73 @@ fn transfers(s: &mut Ui) {
         job(5, "Uploading “css” to site on web1 production", Direction::Upload, JobState::Done, css),
         job(6, "Deleting “old-landing.html” from web1 production", Direction::Delete, JobState::Queued, old),
     ];
+}
+
+/// An item of a scene job: `rel` under the job's selection, its state and progress.
+fn item(rel: &str, size: u64, done: u64, state: ItemState, phase: Option<ActivePhase>, speed: f64) -> ItemView {
+    ItemView {
+        path: RPath::new(&format!("/var/www/media/{rel}")),
+        rel: rel.into(),
+        is_dir: false,
+        size: Some(size),
+        bytes_done: done,
+        bytes_per_sec: speed,
+        state,
+        phase,
+        error: None,
+    }
+}
+
+/// Folder downloads: one still counting (no totals yet), one with totals, four files moving
+/// (connecting, retrying, two transferring) and its item list open; and a single large file
+/// (no item rows, no files control).
+fn transfers_folder(s: &mut Ui) {
+    remote(s);
+    s.prefs.transfers_open = true;
+    let here = crate::theme::ui_os().this_computer();
+    let counting = Job { done: 245_000_000, total: 268_000_000, files: (9, 12), current: None, speed: 6_300_000.0 };
+    let mut scanning = job(2, &format!("Downloading “20nov” to untitled folder on {here}"), Direction::Download, JobState::Scanning, counting);
+    scanning.progress.bytes_total = None;
+    scanning.progress.files_total = None;
+    scanning.progress.eta = None;
+    scanning.progress.bytes_found = 268_000_000;
+    scanning.dest = "untitled folder".into();
+    scanning.items.active = vec![
+        item("20nov/clip-10.mov", 31_000_000, 12_400_000, ItemState::Active, Some(ActivePhase::Transferring), 3_100_000.0),
+        item("20nov/raw/clip-11.mov", 28_000_000, 4_100_000, ItemState::Active, Some(ActivePhase::Transferring), 3_200_000.0),
+    ];
+    scanning.items.counts = ItemCounts { active: 2, queued: 1, done: 9, ..ItemCounts::default() };
+
+    let known = Job { done: 88_300_000, total: 21_550_000_000, files: (5, 24), current: None, speed: 13_300_000.0 };
+    let mut running = job(3, &format!("Downloading “Friends S01” to Downloads on {here}"), Direction::Download, JobState::Running, known);
+    running.files_at_once = 6;
+    running.dest = "Downloads".into();
+    running.progress.eta = Some(Duration::from_secs(25 * 60));
+    let ep = |n: u32, title: &str| format!("Friends S01/Friends.S01E{n:02}.The.One.{title}.1080p.BluRay.x264.mkv");
+    let retry_at = std::time::Instant::now() + Duration::from_millis(4_400);
+    let active = vec![
+        item(&ep(5, "With.The.East.German.Laundry.Detergent"), 920_000_000, 414_000_000, ItemState::Active, Some(ActivePhase::Transferring), 7_100_000.0),
+        item(&ep(6, "With.The.Butt"), 910_000_000, 112_000_000, ItemState::Active, Some(ActivePhase::Transferring), 6_200_000.0),
+        item(&ep(7, "With.The.Blackout"), 905_000_000, 0, ItemState::Active, Some(ActivePhase::Connecting), 0.0),
+        item(&ep(8, "Where.Nana.Dies.Twice"), 899_000_000, 31_000_000, ItemState::Active, Some(ActivePhase::Retrying { at: retry_at }), 0.0),
+    ];
+    let queued: Vec<ItemView> = [(9, "Where.Underdog.Gets.Away"), (10, "With.The.Monkey"), (11, "With.Mrs.Bing")]
+        .iter().map(|(n, t)| item(&ep(*n, t), 900_000_000, 0, ItemState::Queued, None, 0.0)).collect();
+    let skipped = vec![item(&ep(4, "With.George.Stephanopoulos"), 915_000_000, 0, ItemState::Skipped, None, 0.0)];
+    running.items.counts = ItemCounts { active: 4, queued: queued.len(), done: 4, failed: 0, skipped: 1 };
+    running.items.active = active.clone();
+    running.items.open = true;
+    running.items.pages.insert((0, 0), active);
+    running.items.pages.insert((1, 0), queued);
+    running.items.pages.insert((4, 0), skipped);
+
+    let big = Job { done: 512_000_000, total: 2_147_483_648, files: (0, 1), current: None, speed: 18_400_000.0 };
+    s.transfers.rows = vec![running, scanning, job(1, &format!("Downloading “site-2026-11.tar” to backups on {here}"), Direction::Download, JobState::Running, big)];
+}
+
+fn transfers_folder_dark(s: &mut Ui) {
+    transfers_folder(s);
+    s.prefs.appearance = Appearance::Dark;
 }
 
 fn transfers_dark(s: &mut Ui) {
@@ -389,4 +475,89 @@ fn license_sheet_limit(s: &mut Ui) {
     if let Some(Sheet::License(l)) = &mut s.sheet {
         l.phase = crate::license_ui::Phase::Failed(filewinch_license::Failure::LimitReached);
     }
+}
+
+/// The right pane on an external SSD, its location menu open: This Mac, then the mounted
+/// volumes (the boot disk, the SSD, a disk image, a network share) with their free space.
+fn source_menu_volumes(s: &mut Ui) {
+    use filewinch_os::volumes::{Volume, VolumeKind};
+    let vol = |name: &str, path: &str, kind, boot, total: u64, free: u64| Volume {
+        name: name.into(),
+        path: path.into(),
+        kind,
+        boot,
+        total: Some(total),
+        free: Some(free),
+    };
+    local(s);
+    s.volumes.set(vec![
+        vol("Macintosh HD", "/", VolumeKind::Internal, true, 994_662_584_320, 212_400_000_000),
+        vol("CMG-512M2", "/Volumes/CMG-512M2", VolumeKind::External, false, 494_000_000_000, 340_200_000_000),
+        vol("Filewinch 0.9.0", "/Volumes/Filewinch 0.9.0", VolumeKind::DiskImage, false, 48_000_000, 1_200_000),
+        vol("Studio Share", "/Volumes/Studio Share", VolumeKind::Network, false, 8_000_000_000_000, 2_610_000_000_000),
+    ]);
+    show(s, 1, "/Volumes/CMG-512M2");
+    s.active = 1;
+    s.source_menu = Some(crate::pane::source_menu::SourceMenu { pane: 1, favorites: false });
+}
+
+/// The connect sheet with five saved servers at its top, two of them used recently.
+fn connect_saved(s: &mut Ui) {
+    local(s);
+    for (id, at) in [("web1", 1_795_000_000), ("drive", 1_794_000_000)] {
+        if let Some(f) = s.sites.get(id) {
+            s.recents.items.insert(0, Recent { site: f.site.clone(), at });
+        }
+    }
+    s.open_connect_in(1);
+}
+
+/// Twelve saved servers: the list scrolls after five, and a filter appears.
+fn connect_saved_many(s: &mut Ui) {
+    connect_saved(s);
+    let more = [
+        ("mail", "Mail relay", Protocol::Sftp, "mail.example.com", "admin"),
+        ("db", "Database backups", Protocol::Sftp, "db1.example.com", "backup"),
+        ("cdn", "CDN origin", Protocol::S3, "", "AKIAEXAMPLE"),
+        ("docs", "Docs site", Protocol::Ftps, "docs.example.org", "docs"),
+        ("box", "Client uploads", Protocol::Box, "", "studio@example.com"),
+        ("legacy", "Legacy host", Protocol::Ftp, "old.example.net", "www"),
+        ("drop", "Dropbox", Protocol::Dropbox, "", "alex@example.com"),
+    ];
+    for (id, name, p, host, user) in more {
+        s.sites.upsert(Favorite::new(site(id, name, p, host, user), None));
+    }
+    s.open_connect_in(1);
+}
+
+/// A download landing in the right pane's `img` folder: two files still on their way show as
+/// rows with a spinner and "Downloading…" (one only under its temporary name so far), next to
+/// the files already there.
+fn downloading(s: &mut Ui) {
+    use crate::pane::live::Flight;
+    local(s);
+    show(s, 1, &format!("{SITE}/img"));
+    for (name, size) in [("hero.jpg", 812_004), ("team-05.jpg", 60_000), ("banner-wide.png", 2_843_551)] {
+        s.flights.push(Flight { job: 1, session: 0, path: RPath::new(&format!("{SITE}/img/{name}")), size: Some(size), label: "Downloading…", done: false });
+    }
+    s.active = 1;
+    // The drawer shows the job those files belong to.
+    s.prefs.transfers_open = true;
+    let img = Job { done: 1_204_330, total: 3_715_555, files: (0, 3), current: None, speed: 1_850_000.0 };
+    let mut row = job(1, &format!("Downloading “img” to acme-site on {}", crate::theme::ui_os().this_computer()), Direction::Download, JobState::Running, img);
+    row.dest = "img".into();
+    row.items.counts = ItemCounts { active: 3, ..ItemCounts::default() };
+    row.items.active = [("hero.jpg", 812_004u64, 512_000u64), ("team-05.jpg", 60_000, 0), ("banner-wide.png", 2_843_551, 692_330)]
+        .iter()
+        .map(|(n, size, done)| {
+            let phase = if *done == 0 { ActivePhase::Connecting } else { ActivePhase::Transferring };
+            ItemView { path: RPath::new(&format!("/var/www/site/img/{n}")), rel: format!("img/{n}"), is_dir: false, size: Some(*size), bytes_done: *done, bytes_per_sec: 600_000.0, state: ItemState::Active, phase: Some(phase), error: None }
+        })
+        .collect();
+    s.transfers.rows = vec![row];
+}
+
+fn downloading_dark(s: &mut Ui) {
+    downloading(s);
+    s.prefs.appearance = Appearance::Dark;
 }

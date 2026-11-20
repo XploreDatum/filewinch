@@ -65,6 +65,13 @@ impl FakeRemote {
         f
     }
 
+    /// The same tree with `home` as its home folder.
+    #[cfg(test)]
+    pub fn with_home(mut self, home: &str) -> FakeRemote {
+        self.home = Some(RPath::new(home));
+        self
+    }
+
     /// A small web root, `/var/www/site` with pages, styles and images, and `/var/www/logs`.
     /// Dates are fixed (see [`scene_now`]); the scenes' local site is the same project.
     pub fn web_server() -> FakeRemote {
@@ -123,6 +130,12 @@ impl FakeRemote {
             (design("photos/team-01.jpg"), 60_000, ist(18, 15, 58)),
             (design("notes.txt"), 2_210, ist(20, 9, 5)),
             ("/Users/alex/Desktop/screenshot.png".into(), 412_993, ist(20, 9, 1)),
+            // An external SSD, for the location menu's scene.
+            ("/Volumes/CMG-512M2/Footage/2026-11-18 shoot/A001_C004.mov".into(), 3_812_004_112, ist(18, 16, 40)),
+            ("/Volumes/CMG-512M2/Backups/acme-site-2026-11-01.tar.gz".into(), 44_102_334, ist(1, 11, 5)),
+            ("/Volumes/CMG-512M2/Exports/hero-banner-final.png".into(), 2_843_551, ist(19, 17, 52)),
+            ("/Volumes/CMG-512M2/Exports/brand-reel.mp4".into(), 612_334_008, ist(19, 18, 30)),
+            ("/Volumes/CMG-512M2/README.txt".into(), 912, ist(-40, 10, 0)),
         ];
         for i in 1..=4 {
             files.push((site(&format!("img/team-{i:02}.jpg")), 60_000, ist(20, 10, 27)));

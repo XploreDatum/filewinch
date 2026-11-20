@@ -1,7 +1,7 @@
 //! The [`Remote`] over a small pool of SFTP connections.
 
 use crate::session::{self, Conn, Params};
-use crate::{MAX_CONNECTIONS, errors, runtime};
+use crate::{MAX_CONNECTIONS, MAX_SEGMENT_CONNECTIONS, errors, runtime};
 use filewinch_core::{Caps, Entry, EntryKind, Error, ErrorKind, RPath, Remote, Result, WriteSink};
 use russh_sftp::client::SftpSession;
 use russh_sftp::client::error::Error as SftpError;
@@ -41,6 +41,10 @@ struct Pool {
     params: Params,
     slots: Mutex<Vec<Arc<Slot>>>,
     closed: AtomicBool,
+    /// Connections being opened for ranged reads (counted against the cap).
+    opening: AtomicUsize,
+    /// The server refused an extra connection: ranged reads share the ones there are.
+    no_more: AtomicBool,
 }
 
 impl Pool {
@@ -74,6 +78,50 @@ impl Pool {
         let slot = Arc::new(Slot { conn, busy: AtomicUsize::new(1) });
         self.slots().push(slot.clone());
         Ok(Lease(slot))
+    }
+
+    /// A connection for one piece of a segmented download: an idle one, else a new one up to
+    /// [`MAX_SEGMENT_CONNECTIONS`], else a share of the least busy (each piece still gets its
+    /// own file handle, with its own pipelined requests). A server that refuses another
+    /// connection gets no more attempts this session.
+    fn lease_ranged(&self) -> Result<Lease> {
+        if self.closed.load(Ordering::SeqCst) {
+            return Err(Error::new(ErrorKind::Closed, "This connection was closed."));
+        }
+        {
+            let mut slots = self.slots();
+            slots.retain(|s| !s.dead());
+            let pick = match slots.iter().find(|s| s.busy.load(Ordering::SeqCst) == 0) {
+                Some(s) => Some(s.clone()),
+                None => {
+                    let full = self.no_more.load(Ordering::SeqCst)
+                        || slots.len() + self.opening.load(Ordering::SeqCst) >= MAX_SEGMENT_CONNECTIONS;
+                    full.then(|| slots.iter().min_by_key(|s| s.busy.load(Ordering::SeqCst)).cloned()).flatten()
+                }
+            };
+            if let Some(s) = pick {
+                s.busy.fetch_add(1, Ordering::SeqCst);
+                return Ok(Lease(s));
+            }
+            self.opening.fetch_add(1, Ordering::SeqCst);
+        }
+        let opened = runtime().block_on(session::open(&self.params));
+        self.opening.fetch_sub(1, Ordering::SeqCst);
+        match opened {
+            Ok(conn) => {
+                let slot = Arc::new(Slot { conn, busy: AtomicUsize::new(1) });
+                self.slots().push(slot.clone());
+                Ok(Lease(slot))
+            }
+            Err(e) => {
+                let mut slots = self.slots();
+                slots.retain(|s| !s.dead());
+                let Some(s) = slots.iter().min_by_key(|s| s.busy.load(Ordering::SeqCst)).cloned() else { return Err(e) };
+                self.no_more.store(true, Ordering::SeqCst);
+                s.busy.fetch_add(1, Ordering::SeqCst);
+                Ok(Lease(s))
+            }
+        }
     }
 
     fn forget(&self, slot: &Arc<Slot>) {
@@ -142,7 +190,13 @@ impl SftpRemote {
             .block_on(conn.sftp.canonicalize("."))
             .map(|h| RPath::new(&h))
             .unwrap_or_else(|_| RPath::root());
-        let pool = Pool { params, slots: Mutex::new(vec![Arc::new(Slot { conn, busy: AtomicUsize::new(0) })]), closed: AtomicBool::new(false) };
+        let pool = Pool {
+            params,
+            slots: Mutex::new(vec![Arc::new(Slot { conn, busy: AtomicUsize::new(0) })]),
+            closed: AtomicBool::new(false),
+            opening: AtomicUsize::new(0),
+            no_more: AtomicBool::new(false),
+        };
         Ok(SftpRemote { pool: Arc::new(pool), home })
     }
 
@@ -167,6 +221,7 @@ impl Remote for SftpRemote {
             real_dirs: true,
             server_rename: true,
             server_copy: false,
+            ranged_reads: true,
         }
     }
 
@@ -215,6 +270,18 @@ impl Remote for SftpRemote {
             Ok::<File, Error>(f)
         })?;
         Ok(Box::new(SftpReader { file, lease, what }))
+    }
+
+    fn read_range(&self, path: &RPath, offset: u64, len: u64) -> Result<Box<dyn Read + Send>> {
+        let what = format!("read {}", q(path));
+        let lease = self.pool.lease_ranged()?;
+        let p = path.as_str().to_string();
+        let file = runtime().block_on(async {
+            let mut f = lease.0.conn.sftp.open_with_flags(p, OpenFlags::READ).await.map_err(|e| errors::sftp(e, &what))?;
+            f.seek(io::SeekFrom::Start(offset)).await.map_err(|e| errors::file_io(e, false, &what))?;
+            Ok::<File, Error>(f)
+        })?;
+        Ok(Box::new(SftpReader { file, lease, what }.take(len)))
     }
 
     fn write(&self, path: &RPath, offset: u64, _size: Option<u64>) -> Result<Box<dyn WriteSink>> {

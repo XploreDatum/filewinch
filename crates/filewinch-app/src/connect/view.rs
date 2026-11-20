@@ -185,7 +185,11 @@ pub fn sheet(s: &Ui, f: &Form, k: &Kit, paint: &Paint, layer: &mut Vec<El>) {
         .child(icon(icons::protocol(p), 16.0).color(paint.accent).a11y_hidden())
         .child(text(p.label()).font(k.ty.text_small_medium).color(k.c.text_base).a11y_hidden())
         .child(icon(k.glyph.chevron_down, 14.0).color(k.c.icon_muted).a11y_hidden());
-    let mut body = col().key("connect-body").gap(10.0).px(16.0).pb(16.0).w_full()
+    let mut body = col().key("connect-body").gap(10.0).px(16.0).pb(16.0).w_full();
+    if let Some(saved) = super::saved::section(s, f, k, paint) {
+        body = body.child(saved).child(rune::el().key("saved-rule").w_full().h(1.0).my(2.0).fill(paint.hair).a11y_hidden());
+    }
+    body = body
         .child(row().w_full().gap(12.0).center_y()
             .child(text("Protocol").font(k.ty.text_small).color(k.c.text_muted).w(124.0).align(rune::Align::End).a11y_hidden())
             .child(picker));
@@ -278,7 +282,7 @@ pub fn sheet(s: &Ui, f: &Form, k: &Kit, paint: &Paint, layer: &mut Vec<El>) {
             .on_press(|s: &mut Ui| s.connect_from_form()).build(&crate::theme::primary(k)).key("connect-submit").default_button());
     }
     body = body.child(footer);
-    let title = if f.editing.is_some() { "Edit Favorite" } else { "Connect to a Server" };
+    let title = if f.editing.is_some() { "Edit Server" } else { "Connect to a Server" };
     Dialog::new("connect", title).open(true).width(580.0).fit().child(body).click_outside(false)
         .on_close(|s: &mut Ui| {
             crate::oauth::cancel_sign_in();

@@ -12,7 +12,15 @@ name = "filewinch"
 path = "src/main.rs"
 
 [features]
-default = ["sftp", "ftp", "webdav", "s3", "azure", "swift", "cloud"]
+default = ["backends", "dev-tools"]
+# Every backend. Release builds (scripts/release-mac.sh, package-windows.ps1, package-linux.sh,
+# bundle.sh, the release workflow) build `--no-default-features --features backends`.
+backends = ["sftp", "ftp", "webdav", "s3", "azure", "swift", "cloud"]
+# Developer tooling, left out of release builds: Rune's headless runs (--snap, --tree, --script,
+# ...), the demo scenes and their in-memory data (scenes.rs, fake.rs), and --look/--appearance.
+# Without it those flags say they aren't available. `cargo run`, the tests and
+# scripts/screens.sh build with it.
+dev-tools = ["rune/tooling"]
 # One feature per backend crate; `registry.rs` lists their connectors.
 sftp = ["dep:filewinch-sftp"]
 ftp = ["dep:filewinch-ftp"]
@@ -38,7 +46,14 @@ filewinch-azure = { path = "../filewinch-azure", optional = true }
 filewinch-swift = { path = "../filewinch-swift", optional = true }
 filewinch-cloud = { path = "../filewinch-cloud", optional = true }
 libc = "0.2"
-rune = { workspace = true, features = ["native-file-dialog", "tooling"] }
+# Watches the folder a This Mac pane shows, for changes other apps make (FSEvents, inotify,
+# ReadDirectoryChangesW).
+notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
+# Rune without its default `ogg-audio` (Ogg/WebM audio decoding; Filewinch plays no media). The
+# rest of Rune's defaults stay: accessibility (VoiceOver, Narrator, AT-SPI), dbus (Linux theme and
+# the file dialog portal), embedded-fonts (the UI is set in Inter; no fonts are registered), the
+# Metal backend on macOS, and svg (icons.rs draws every icon from SVG paths).
+rune = { workspace = true, features = ["accessibility", "dbus", "embedded-fonts", "metal-backend", "svg", "native-file-dialog"] }
 rune-kit = { workspace = true }
 
 # Only to hide AppKit's standard About item, so Filewinch ▸ About opens Filewinch's own About

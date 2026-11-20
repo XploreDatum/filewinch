@@ -8,10 +8,16 @@ mod empty_tests;
 pub mod header;
 pub mod keys;
 pub mod layout;
+pub mod live;
+#[cfg(test)]
+mod live_tests;
 pub mod model;
+pub mod source_menu;
 #[cfg(test)]
 mod tests;
 pub mod view;
+#[cfg(test)]
+mod volumes_tests;
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -103,6 +109,17 @@ pub struct Pane {
     /// system drag isn't available (`crate::drag_app`).
     pub rect: [f32; 4],
     pub rows_rect: Option<[f32; 4]>,
+    /// The non-boot volume this local pane is inside (kept after an unmount, to name it).
+    pub volume: Option<filewinch_os::volumes::Volume>,
+    /// When a debounced re-list is due (UI clock), after a transfer or another app changed
+    /// this folder (see `pane::live`).
+    pub refresh_at: Option<f64>,
+    /// A listing is on its way: a due re-list waits for it, so at most one is in flight.
+    pub busy: bool,
+    /// Files a transfer is writing here now, by name: "Downloading…", "Uploading…".
+    pub incoming: std::collections::HashMap<String, &'static str>,
+    /// Rows shown for transfers the listing doesn't have yet (written under a temporary name).
+    pub synthetic: HashSet<String>,
     latest: Latest<Listed>,
     /// Lists on the calling thread (headless runs and tests, for determinism).
     sync_io: bool,
@@ -131,6 +148,11 @@ impl Pane {
             header_drag: None,
             rect: [0.0; 4],
             rows_rect: None,
+            volume: None,
+            refresh_at: None,
+            busy: false,
+            incoming: Default::default(),
+            synthetic: HashSet::new(),
             latest: Latest::default(),
             sync_io,
         }
@@ -174,6 +196,7 @@ impl Pane {
         self.reveal = None;
         self.header_drag = None;
         self.filter = TextEdit::new("");
+        self.forget_live();
         self.dir = RPath::root();
         self.listing = Listing::Ready;
         self.rearrange(show_hidden);
@@ -187,6 +210,7 @@ impl Pane {
         self.entries.clear();
         self.sel = Selection::default();
         self.filter = TextEdit::new("");
+        self.forget_live();
         self.dir = dir;
         self.rearrange(show_hidden);
         self.load(None, show_hidden);
@@ -252,6 +276,7 @@ impl Pane {
     }
 
     fn leave_folder(&mut self, show_hidden: bool) {
+        self.forget_live();
         self.entries.clear();
         self.sel = Selection::default();
         self.rename = None;
@@ -264,12 +289,21 @@ impl Pane {
     }
 
     fn load(&mut self, link_from: Option<RPath>, show_hidden: bool) {
+        self.load_with(link_from, show_hidden, false);
+    }
+
+    /// Lists the folder again. `quiet`: a background re-list (a transfer or another app changed
+    /// the folder): rows, selection and scroll stay as they are until the new listing lands.
+    fn load_with(&mut self, link_from: Option<RPath>, show_hidden: bool, quiet: bool) {
         let Some(src) = &self.src else {
             // Nothing to list: an empty pane does no IO.
             self.listing = Listing::Ready;
             return;
         };
-        self.listing = Listing::Loading;
+        if !quiet {
+            self.listing = Listing::Loading;
+            self.refresh_at = None;
+        }
         let (remote, session, dir) = (src.remote.clone(), src.session, self.dir.clone());
         let work = move |(remote, dir, link_from): (Arc<dyn Remote>, RPath, Option<RPath>)| Listed {
             session,
@@ -281,6 +315,7 @@ impl Pane {
             let listed = work((remote, dir, link_from));
             self.apply(listed, show_hidden);
         } else {
+            self.busy = true;
             self.latest.request((remote, dir, link_from), work);
         }
     }
@@ -289,6 +324,7 @@ impl Pane {
     pub fn poll(&mut self, show_hidden: bool) -> bool {
         match self.latest.take() {
             Some(listed) => {
+                self.busy = false;
                 self.apply(listed, show_hidden);
                 true
             }
@@ -307,6 +343,8 @@ impl Pane {
         match listed.result {
             Ok(entries) => {
                 self.entries = entries;
+                // A listing has every real item; transfers' placeholder rows are re-added after.
+                self.synthetic.clear();
                 self.listing = Listing::Ready;
                 let names: HashSet<&str> = self.entries.iter().map(|e| e.name.as_str()).collect();
                 self.sel.retain_listed(&names);
@@ -324,6 +362,7 @@ impl Pane {
             }
             Err(e) => {
                 self.entries.clear();
+                self.synthetic.clear();
                 self.listing = Listing::Failed(e);
                 self.rearrange(show_hidden);
             }

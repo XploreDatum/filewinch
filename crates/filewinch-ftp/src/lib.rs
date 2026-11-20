@@ -9,6 +9,8 @@
 //! - UTF-8 file names (`OPTS UTF8 ON`), binary transfers.
 //! - Resume: downloads with `REST`; uploads with `REST`+`STOR`, falling back to `APPE` onto a
 //!   partial file of the expected size.
+//! - Ranged reads for segmented downloads ([`MAX_SEGMENT_CONNECTIONS`]); a server that
+//!   refuses the extra connections (421) makes the engine fall back to one.
 //! - `MFMT` for modification times (when offered), `SITE CHMOD` for permissions on Unix servers.
 //! - A pool of up to [`MAX_CONNECTIONS`] control connections, since FTP runs one transfer per
 //!   control connection. Idle connections get a `NOOP` before reuse and are replaced when dead;
@@ -28,8 +30,12 @@ use std::sync::Arc;
 
 use filewinch_core::{Connector, Protocol, Remote, Result, SecretRef, Secrets, Site};
 
-/// Control connections one FTP site opens at most.
+/// Control connections one FTP site opens at most for ordinary transfers.
 pub const MAX_CONNECTIONS: usize = 4;
+
+/// Control connections a site may grow to for segmented downloads (each piece is a `REST` +
+/// `RETR` on its own connection, stopped with `ABOR` once its bytes are in).
+pub const MAX_SEGMENT_CONNECTIONS: usize = 8;
 
 /// Opens sessions for [`Protocol::Ftp`] and [`Protocol::Ftps`] sites.
 pub struct FtpConnector;

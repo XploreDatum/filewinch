@@ -168,7 +168,7 @@ impl B2Remote {
 
 impl Remote for B2Remote {
     fn caps(&self) -> Caps {
-        Caps { resume_read: true, server_copy: true, ..Caps::default() }
+        Caps { resume_read: true, server_copy: true, ranged_reads: true, ..Caps::default() }
     }
 
     fn home(&self) -> Result<RPath> {
@@ -271,6 +271,26 @@ impl Remote for B2Remote {
         };
         let host = host_of(&self.session.account().download_url);
         crate::body::ranged_reader(resp, offset, what, host)
+    }
+
+    fn read_range(&self, path: &RPath, offset: u64, len: u64) -> Result<Box<dyn Read + Send>> {
+        self.session.check_open()?;
+        let what = format!("download {path}");
+        let (bucket, name) = need_name(path, &what)?;
+        let range = filewinch_core::range_header(offset, len);
+        let resp = self.session.with_auth(&what, |acct| {
+            let url = format!("{}/file/{}/{}", acct.download_url, encode_path(bucket), encode_path(name));
+            let host = host_of(&acct.download_url);
+            let req = self.session.http.agent().get(&url).header("authorization", acct.token.as_str()).header("range", range.as_str());
+            let resp = req.call().map_err(|e| Failure::Error(self.session.http.transport_error(e, &host)))?;
+            if resp.status().is_success() {
+                return Ok(Some(resp));
+            }
+            json_or_failure(resp, &what, &host).map(|_| None)
+        });
+        let Some(resp) = resp? else { return Err(Error::new(ErrorKind::Other, format!("Couldn't {what}."))) };
+        let host = host_of(&self.session.account().download_url);
+        crate::body::exact_range(resp, offset, len, what, host)
     }
 
     fn write(&self, path: &RPath, offset: u64, size: Option<u64>) -> Result<Box<dyn WriteSink>> {

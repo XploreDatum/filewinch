@@ -366,6 +366,7 @@ impl Remote for BoxDrive {
             real_dirs: true,
             server_rename: true,
             server_copy: true,
+            ranged_reads: true,
         }
     }
 
@@ -421,6 +422,17 @@ impl Remote for BoxDrive {
         Ok(reader)
     }
 
+    fn read_range(&self, path: &RPath, offset: u64, len: u64) -> Result<Box<dyn Read + Send>> {
+        let item = self.resolve(path)?;
+        if item.dir {
+            return Err(error(ErrorKind::InvalidPath, P.label(), path, "it's a folder, not a file"));
+        }
+        let call = Call::get(self.api(&format!("files/{}/content", item.id)))
+            .header("Range", filewinch_core::range_header(offset, len))
+            .subject(path)
+            .classify(classify);
+        crate::http::ranged_body(self.s.send(call)?, offset, len, &format!("“{}”", path.name()))
+    }
     fn write(&self, path: &RPath, offset: u64, size: Option<u64>) -> Result<Box<dyn WriteSink>> {
         if offset > 0 {
             return Err(Error::unsupported("resuming uploads to Box"));

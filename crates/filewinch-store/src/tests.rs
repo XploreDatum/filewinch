@@ -176,6 +176,44 @@ fn column_layout_round_trips_and_old_files_get_the_standard_columns() {
 }
 
 #[test]
+fn connections_per_download_migrates_to_3_and_is_clamped() {
+    let dir = Scratch::new("prefs-segments");
+    let store = Store::new(&dir.0);
+    fs::create_dir_all(&dir.0).unwrap();
+    // A settings file from before the option: everything else kept, the new one at 3.
+    fs::write(dir.0.join("prefs.json"), br#"{"max_jobs": 5, "files_per_job": 6, "retries": 2}"#).unwrap();
+    let p = store.load_prefs().value.clamped();
+    assert_eq!((p.max_jobs, p.files_per_job, p.retries, p.segments_per_file), (5, 6, 2, 3));
+    assert_eq!(p.version, Prefs::VERSION);
+    assert_eq!(Prefs::default().segments_per_file, 3);
+    // A chosen value survives a save; out-of-range values are clamped to 1..=16.
+    store.save_prefs(&Prefs { segments_per_file: 8, ..p }).unwrap();
+    assert_eq!(store.load_prefs().value.segments_per_file, 8);
+    assert_eq!(Prefs { segments_per_file: 0, ..Prefs::default() }.clamped().segments_per_file, 1);
+    assert_eq!(Prefs { segments_per_file: 99, ..Prefs::default() }.clamped().segments_per_file, 16);
+}
+
+#[test]
+fn files_per_transfer_old_default_becomes_3_and_chosen_values_stay() {
+    let dir = Scratch::new("prefs-files");
+    let store = Store::new(&dir.0);
+    fs::create_dir_all(&dir.0).unwrap();
+    assert_eq!(Prefs::default().files_per_job, 3);
+    // Before versioning, the old default 4 was saved like any value: it moves to 3.
+    fs::write(dir.0.join("prefs.json"), br#"{"files_per_job": 4, "max_jobs": 3}"#).unwrap();
+    assert_eq!(store.load_prefs().value.clamped().files_per_job, 3);
+    // A value someone chose is kept.
+    fs::write(dir.0.join("prefs.json"), br#"{"files_per_job": 6}"#).unwrap();
+    assert_eq!(store.load_prefs().value.clamped().files_per_job, 6);
+    // No value at all: the new default.
+    fs::write(dir.0.join("prefs.json"), br#"{"max_jobs": 2}"#).unwrap();
+    assert_eq!(store.load_prefs().value.clamped().files_per_job, 3);
+    // Once saved at version 1, a 4 is a choice and stays.
+    store.save_prefs(&Prefs { files_per_job: 4, ..Prefs::default() }).unwrap();
+    assert_eq!(store.load_prefs().value.clamped().files_per_job, 4);
+}
+
+#[test]
 fn a_hand_edited_column_list_is_made_whole() {
     let dir = Scratch::new("prefs-columns-edited");
     let store = Store::new(&dir.0);

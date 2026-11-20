@@ -8,6 +8,9 @@ use filewinch_core::{Entry, EntryKind, Error, ErrorKind, RPath, Remote, Result};
 use std::sync::mpsc::Sender;
 
 fn send(ctx: &JobCtx, tx: &Sender<Item>, src: Entry, dst: RPath, keep_src: bool) {
+    let Some(live) = ctx.items.found(&src.path, ctx.rel(&src.path), src.is_dir(), src.size, true) else {
+        return; // inside a folder the person skipped
+    };
     let size = src.size.unwrap_or(0);
     ctx.meter.add_total(1, size);
     let already = ctx.done.lock().unwrap_or_else(|e| e.into_inner()).contains(&src.path);
@@ -18,7 +21,7 @@ fn send(ctx: &JobCtx, tx: &Sender<Item>, src: Entry, dst: RPath, keep_src: bool)
         return;
     }
     // Workers outlive the scan, so the receiver is alive while we send.
-    let _ = tx.send(Item { src, dst, keep_src });
+    let _ = tx.send(Item { src, dst, keep_src, live });
 }
 
 /// Follows a symlink (up to 8 hops) to what it points at, keeping the link's own name and
@@ -140,6 +143,7 @@ pub(crate) fn scan_transfer(
                         if !keep {
                             src_dirs.push(p.clone());
                         }
+                        ctx.items.found(p, ctx.rel(p), true, None, false);
                         stack.push((p.clone(), t, keep));
                     }
                     Ok(None) => tally.keep(p),
@@ -154,13 +158,22 @@ pub(crate) fn scan_transfer(
 
     while let Some((sd, td, kept)) = stack.pop() {
         ctx.ctl.checkpoint()?;
+        if ctx.items.under_skipped(&sd) {
+            // Skipped before it was listed: nothing in it is found, its source stays, and the
+            // empty folder made for it goes again.
+            tally.keep(&sd);
+            let _ = dst.remove_dir(&td);
+            continue;
+        }
         let children = match ctx.retrying(|| ctx.src().list(&sd)) {
             Ok(c) => c,
             Err(err) => {
+                ctx.items.set(&sd, crate::items::ItemState::Failed, Some(err.clone()));
                 ctx.fail(tally, &sd, err);
                 continue;
             }
         };
+        ctx.items.set(&sd, crate::items::ItemState::Done, None);
         for c in children {
             let target = td.join(&c.name);
             let keep = kept || (copy_deletes && c.shared.is_some());
@@ -174,17 +187,64 @@ pub(crate) fn scan_transfer(
                         send(ctx, tx, f, target, keep);
                     }
                 }
+                EntryKind::Dir if ctx.items.under_skipped(&c.path) => tally.keep(&c.path),
                 EntryKind::Dir => match prepare_dir(ctx, &target, false) {
                     Ok(Some(t)) => {
                         if !keep {
                             src_dirs.push(c.path.clone());
                         }
+                        ctx.items.found(&c.path, ctx.rel(&c.path), true, None, false);
                         stack.push((c.path, t, keep));
                     }
                     Ok(None) => tally.keep(&c.path),
                     Err(err) => ctx.fail(tally, &c.path, err),
                 },
                 EntryKind::Other => {}
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Walks the job's paths for [`crate::Op::SetMode`]: files go to the workers as found; folders
+/// are returned (in walk order, with their live counters) to be changed last, deepest first,
+/// because taking away a folder's read or execute access would stop the walk and the changes
+/// inside it. Symbolic links are left alone.
+pub(crate) fn scan_set_mode(ctx: &JobCtx, tally: &Tally, tx: &Sender<Item>, dirs: &mut Vec<(Entry, std::sync::Arc<crate::items::Live>)>) -> Result<()> {
+    let mut stack: Vec<Entry> = Vec::new();
+    let mut found_dir = |ctx: &JobCtx, e: Entry, stack: &mut Vec<Entry>| {
+        if let Some(live) = ctx.items.found(&e.path, ctx.rel(&e.path), true, None, true) {
+            ctx.meter.add_total(1, 0);
+            dirs.push((e.clone(), live));
+            stack.push(e);
+        }
+    };
+    for p in &ctx.job.src_paths {
+        ctx.ctl.checkpoint()?;
+        match ctx.retrying(|| ctx.src().stat(p)) {
+            Ok(e) if e.is_dir() => found_dir(ctx, e, &mut stack),
+            Ok(e) if e.kind == EntryKind::File => send(ctx, tx, e, RPath::root(), false),
+            Ok(_) => {}
+            Err(e) => ctx.fail(tally, p, e),
+        }
+    }
+    while let Some(d) = stack.pop() {
+        ctx.ctl.checkpoint()?;
+        if ctx.items.under_skipped(&d.path) {
+            continue;
+        }
+        let children = match ctx.retrying(|| ctx.src().list(&d.path)) {
+            Ok(c) => c,
+            Err(err) => {
+                ctx.fail(tally, &d.path, err);
+                continue;
+            }
+        };
+        for c in children {
+            match c.kind {
+                EntryKind::File => send(ctx, tx, c, RPath::root(), false),
+                EntryKind::Dir => found_dir(ctx, c, &mut stack),
+                _ => {}
             }
         }
     }

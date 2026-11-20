@@ -19,6 +19,7 @@ pub enum Act {
     Hidden,
     Transfers,
     Sidebar,
+    Inspector,
     Back,
     Forward,
     Up,
@@ -32,7 +33,7 @@ pub enum Act {
 impl Act {
     /// The shortcuts the window handles, in matching order (New Folder before New Window, so
     /// the chord with Shift wins).
-    pub const WINDOW: [Act; 16] = [
+    pub const WINDOW: [Act; 17] = [
         Act::NewFolder,
         Act::NewWindow,
         Act::Connect,
@@ -42,6 +43,7 @@ impl Act {
         Act::Hidden,
         Act::Transfers,
         Act::Sidebar,
+        Act::Inspector,
         Act::Back,
         Act::Forward,
         Act::Up,
@@ -67,6 +69,8 @@ impl Act {
             // Ctrl+Alt+T opens a terminal on most Linux desktops.
             Act::Transfers => Keybind::new("mod+shift+t").on(Mac, "mod+alt+t"),
             Act::Sidebar => Keybind::new("f9").on(Mac, "mod+ctrl+s"),
+            // ⌥⌘I on macOS (Finder's Inspector), Ctrl+Alt+I elsewhere.
+            Act::Inspector => Keybind::new("mod+alt+i"),
             Act::Back => Keybind::new("alt+left").on(Mac, "mod+["),
             Act::Forward => Keybind::new("alt+right").on(Mac, "mod+]"),
             Act::Up => Keybind::new("alt+up").on(Mac, "mod+up"),
@@ -128,6 +132,7 @@ pub fn title_on(a: Act, os: Os) -> &'static str {
         (Act::Hidden, _) => "Show Hidden Files",
         (Act::Transfers, _) => "Show Transfers",
         (Act::Sidebar, _) => "Show Sidebar",
+        (Act::Inspector, _) => "Show Inspector",
         (Act::Back, _) => "Back",
         (Act::Forward, _) => "Forward",
         (Act::Up, Os::Mac) => "Enclosing Folder",
@@ -173,6 +178,9 @@ mod tests {
         assert_eq!(Act::Up.label_on(Linux), "Alt+↑");
         assert_eq!(Act::Sidebar.label_on(Mac), "⌃⌘S");
         assert_eq!(Act::Transfers.label_on(Mac), "⌥⌘T");
+        assert_eq!(Act::Inspector.label_on(Mac), "⌥⌘I");
+        assert_eq!(Act::Inspector.label_on(Windows), "Ctrl+Alt+I");
+        assert_eq!(Act::Inspector.label_on(Linux), "Ctrl+Alt+I");
         assert_eq!(Act::Settings.label_on(Mac), "⌘,");
         assert_eq!(Act::Settings.label_on(Linux), "Ctrl+,");
         assert_eq!(Act::Quit.label_on(Linux), "Ctrl+Q");

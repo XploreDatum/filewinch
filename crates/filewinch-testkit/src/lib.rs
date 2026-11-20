@@ -44,8 +44,15 @@
 //! Point a client at `proxy.port` instead of the server's port. Note that FTP data
 //! connections go straight to the server (PASV hands out the server's address), so for FTP
 //! the proxy only affects the control connection.
+//!
+//! # Segmented downloads
+//!
+//! [`segmented::download`] runs one engine download of a server file into a local folder with
+//! a given number of connections, through a [`segmented::Counted`] wrapper that records how
+//! many ranged reads ran and how many at once, and reports the time taken.
 
 mod proxy;
+pub mod segmented;
 
 pub use proxy::FaultProxy;
 

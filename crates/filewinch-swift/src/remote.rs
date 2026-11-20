@@ -63,7 +63,7 @@ impl Read for Download {
 
 impl Remote for SwiftRemote {
     fn caps(&self) -> Caps {
-        Caps { resume_read: true, server_copy: true, ..Caps::default() }
+        Caps { resume_read: true, server_copy: true, ranged_reads: true, ..Caps::default() }
     }
 
     fn home(&self) -> Result<RPath> {
@@ -112,6 +112,24 @@ impl Remote for SwiftRemote {
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.trim().parse::<u64>().ok());
         Ok(Box::new(Download { body: filewinch_http::body_reader(resp), left }))
+    }
+
+    fn read_range(&self, path: &RPath, offset: u64, len: u64) -> Result<Box<dyn Read + Send>> {
+        let (container, key) = Self::object(path, "download")?;
+        let what = format!("download {}", path.name());
+        let range = filewinch_core::range_header(offset, len);
+        let resp = self.client.send("GET", &url_path(&container, Some(&key)), &[("range", &range)], None, &what)?;
+        let status = resp.status().as_u16();
+        match status {
+            200..=299 => {}
+            404 => return Err(not_found(path)),
+            _ => return Err(self.client.fail(resp, &what)),
+        }
+        let header = |name: &str| resp.headers().get(name).and_then(|v| v.to_str().ok()).map(str::to_owned);
+        let n = filewinch_core::check_range_reply(status, header("content-range").as_deref(), offset, len)?;
+        let left = header("content-length").and_then(|v| v.trim().parse::<u64>().ok());
+        let body = Download { body: filewinch_http::body_reader(resp), left };
+        Ok(filewinch_core::exact_reader(Box::new(body), n, &format!("“{}”", path.name())))
     }
 
     fn write(&self, path: &RPath, offset: u64, size: Option<u64>) -> Result<Box<dyn WriteSink>> {

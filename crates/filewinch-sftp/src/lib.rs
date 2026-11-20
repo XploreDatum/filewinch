@@ -27,6 +27,7 @@
 //!   connection of its own while one is free; listings share. Keepalives every 15 s; dead
 //!   connections are dropped and replaced on the next call (metadata calls retry once on a
 //!   fresh connection).
+//! - Ranged reads for segmented downloads ([`MAX_SEGMENT_CONNECTIONS`]).
 //! - Resume in both directions, chmod, mtime, symlinks (`stat` doesn't follow links and fills
 //!   `link_target`), server-side rename, the home folder.
 
@@ -44,8 +45,12 @@ use filewinch_core::{Connector, Protocol, Remote, Result, SecretRef, Secrets, Si
 #[cfg(doc)]
 use filewinch_core::{Auth, ErrorKind};
 
-/// SSH connections one SFTP site opens at most.
+/// SSH connections one SFTP site opens at most for ordinary transfers.
 pub const MAX_CONNECTIONS: usize = 4;
+
+/// SSH connections a site may grow to for segmented downloads; beyond it (or once the server
+/// refuses another), pieces share connections, each with its own file handle.
+pub const MAX_SEGMENT_CONNECTIONS: usize = 8;
 
 /// Opens SFTP sessions for [`Protocol::Sftp`] sites.
 pub struct SftpConnector;

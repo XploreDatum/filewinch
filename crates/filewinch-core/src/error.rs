@@ -62,6 +62,17 @@ impl Error {
     pub fn cancelled() -> Self {
         Self::new(ErrorKind::Cancelled, "Cancelled.")
     }
+    /// A ranged read came back as something other than the requested bytes (an HTTP server
+    /// that answered 200 with the whole file). Kind `Unsupported`: the engine stops splitting
+    /// the download and fetches the rest over one connection.
+    pub fn range_ignored(detail: impl fmt::Display) -> Self {
+        Self::new(ErrorKind::Unsupported, "The server sent the whole file instead of the requested part.").with_detail(detail)
+    }
+    /// The server refused an extra connection (FTP 421, "too many users"). Kind `RateLimited`:
+    /// the engine drops to one connection for that server instead of failing.
+    pub fn too_many_connections(detail: impl fmt::Display) -> Self {
+        Self::new(ErrorKind::RateLimited, "The server allows fewer connections at once.").with_detail(detail)
+    }
 }
 
 impl fmt::Display for Error {

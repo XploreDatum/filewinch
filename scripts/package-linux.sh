@@ -6,7 +6,8 @@
 # Usage (on Linux, from anywhere in the repo):
 #   scripts/package-linux.sh                                 host target
 #   scripts/package-linux.sh --target aarch64-unknown-linux-gnu
-#   FILEWINCH_FEATURES="sftp ftp" scripts/package-linux.sh   backends to include
+#   FILEWINCH_FEATURES="sftp ftp" scripts/package-linux.sh   backends to include (default: all)
+#   Release builds leave out the app's dev-tools feature (headless snapshots, scenes, demo data).
 # Then: tar xzf dist/linux/filewinch-*.tar.gz && ./filewinch-*/install.sh   (to ~/.local)
 #       PREFIX=/usr/local sudo -E ./filewinch-*/install.sh                  (system-wide)
 #       ./filewinch-*/install.sh --uninstall
@@ -53,10 +54,7 @@ pkgid=$(cargo pkgid -p filewinch-app)
 version=${pkgid##*[@#]}
 case "$version" in [0-9]*) ;; *) die "couldn't read the version from '$pkgid'" ;; esac
 
-args=(build --release --locked -p filewinch-app)
-if [ -n "${FILEWINCH_FEATURES:-}" ]; then
-  args+=(--no-default-features --features "$FILEWINCH_FEATURES")
-fi
+args=(build --release --locked -p filewinch-app --no-default-features --features "${FILEWINCH_FEATURES:-backends}")
 if [ -n "$target" ]; then
   args+=(--target "$target")
   bin="$target_dir/$target/release/filewinch"
@@ -72,6 +70,11 @@ esac
 echo "== cargo ${args[*]}"
 cargo "${args[@]}"
 [ -x "$bin" ] || die "build finished but $bin is missing"
+# The release profile strips the binary (Cargo.toml); nothing debug-related goes in the tarball
+# or the AppImage, which copy only the files named below.
+if command -v readelf >/dev/null && readelf -S "$bin" | grep -qE '\.(symtab|debug_)'; then
+  die "$bin isn't stripped; check [profile.release] strip = \"symbols\" in Cargo.toml"
+fi
 
 dist="$root/dist/linux"
 name="filewinch-$version-linux-$arch"

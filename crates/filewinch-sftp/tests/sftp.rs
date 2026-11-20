@@ -420,3 +420,74 @@ fn unreachable_server_is_a_network_error() {
     assert!(err.message.contains("refused the connection"), "{}", err.message);
 }
 
+
+/// A 64 MB download over 4 SFTP connections lands byte-equal, without falling back.
+#[test]
+fn segmented_download_64mb_over_4_connections() {
+    let srv = Server::start(Kind::Sftp, base());
+    let want = data(64 << 20, 9);
+    std::fs::write(srv.root.join("big.bin"), &want).unwrap();
+    let remote: Arc<dyn Remote> = Arc::from(connect(&site(srv.port, &srv.user, pw_auth()), Some(srv.pass.clone())));
+    let dir = scratch_dir(base(), "sftp-seg");
+    let o = filewinch_testkit::segmented::download(remote, &RPath::new("/big.bin"), &dir, 4);
+    assert!(matches!(o.state, JobState::Done), "{o:?}");
+    assert!(std::fs::read(dir.join("big.bin")).unwrap() == want, "bytes differ");
+    assert!(o.max_connections >= 2 && o.ranges >= 4 && o.notes.is_empty(), "{o:?}");
+    let left: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name()).collect();
+    assert_eq!(left.len(), 1, "no temp files left: {left:?}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Throughput with 1, 3 and 8 connections, direct and through a proxy adding latency.
+/// `cargo test --release -p filewinch-sftp --test sftp -- --ignored --nocapture measure`
+#[test]
+#[ignore = "measurement; writes 512 MB of scratch"]
+fn measure_segmented_256mb() {
+    let base = Path::new(env!("CARGO_TARGET_TMPDIR"));
+    let srv = Server::start(Kind::Sftp, base);
+    std::fs::write(srv.root.join("big.bin"), data(256 << 20, 3)).unwrap();
+    let proxy = FaultProxy::start(([127, 0, 0, 1], srv.port).into());
+    proxy.set_latency(Duration::from_millis(2));
+    let dir = scratch_dir(base, "sftp-measure");
+    for (label, port) in [("direct", srv.port), ("2 ms per 16 KB proxy", proxy.port)] {
+        for n in [1, 3, 8] {
+            let remote: Arc<dyn Remote> = Arc::from(connect(&site(port, &srv.user, pw_auth()), Some(srv.pass.clone())));
+            let o = filewinch_testkit::segmented::download(remote, &RPath::new("/big.bin"), &dir, n);
+            assert!(matches!(o.state, JobState::Done), "{o:?}");
+            eprintln!("MEASURE sftp {label}: {n} connection(s): {:.2} s, {:.1} MB/s (max {} at once)", o.secs, 256.0 * 1.048_576 / o.secs, o.max_connections);
+        }
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A folder of 2,000 small files and 4 large ones: time to the first byte (transfers start
+/// while the walk is still counting) and in total.
+/// `cargo test --release -p filewinch-sftp --test sftp -- --ignored --nocapture measure_tree`
+#[test]
+#[ignore = "measurement; writes about 300 MB of scratch"]
+fn measure_tree_first_byte() {
+    let base = Path::new(env!("CARGO_TARGET_TMPDIR"));
+    let srv = Server::start(Kind::Sftp, base);
+    let tree = srv.root.join("tree");
+    for d in 0..40 {
+        let dir = tree.join(format!("d{d:02}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        for f in 0..50 {
+            std::fs::write(dir.join(format!("f{f:02}.txt")), data(2_000 + f * 37, (d * 50 + f) as u32)).unwrap();
+        }
+    }
+    for i in 0..4 {
+        std::fs::write(tree.join(format!("big{i}.bin")), data(64 << 20, 100 + i)).unwrap();
+    }
+    let dir = scratch_dir(base, "sftp-tree");
+    let remote: Arc<dyn Remote> = Arc::from(connect(&site(srv.port, &srv.user, pw_auth()), Some(srv.pass.clone())));
+    let o = filewinch_testkit::segmented::download(remote, &RPath::new("/tree"), &dir, 3);
+    assert!(matches!(o.state, JobState::Done), "{o:?}");
+    eprintln!(
+        "MEASURE sftp tree (2,000 small + 4 × 64 MB): first byte {:.2} s, totals known {:.2} s, done {:.2} s",
+        o.first_byte.unwrap_or(f64::NAN),
+        o.counted.unwrap_or(f64::NAN),
+        o.secs
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}

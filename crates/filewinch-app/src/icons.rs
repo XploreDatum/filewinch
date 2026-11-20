@@ -51,6 +51,24 @@ icon!(LOCK, "lock", r#"<rect x="3.25" y="7" width="9.5" height="7" rx="1.25" str
 icon!(MENU, "menu", r#"<path d="M2.5 4.25H13.5M2.5 8H13.5M2.5 11.75H13.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>"#);
 icon!(WINCH, "winch", r#"<circle cx="8" cy="6" r="4" stroke="currentColor" stroke-width="1.4" fill="none"/><circle cx="8" cy="6" r="1.25" fill="currentColor"/><path d="M12 6V13.25M10.5 11.75L12 13.25L13.5 11.75" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>"#);
 
+// Volumes in the location menu: a disk inside the computer, one on a cable, a share on the
+// network, and a disc (a disk image, or a CD or DVD).
+icon!(DRIVE, "drive", r#"<rect x="1.75" y="4.75" width="12.5" height="6.5" rx="1.75" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M4.25 8H7.75" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><circle cx="11.25" cy="8" r=".85" fill="currentColor"/>"#);
+icon!(DRIVE_EXTERNAL, "drive-external", r#"<rect x="4.25" y="3.25" width="10" height="7" rx="1.5" stroke="currentColor" stroke-width="1.2" fill="none"/><circle cx="11.5" cy="6.75" r=".85" fill="currentColor"/><path d="M4.25 6.75H3.25C2.42 6.75 1.75 7.42 1.75 8.25V12.75" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" fill="none"/><rect x="0.75" y="12" width="2" height="2.25" rx=".5" fill="currentColor"/>"#);
+icon!(NETWORK_SHARE, "network-share", r#"<rect x="3.25" y="1.75" width="9.5" height="6.5" rx="1.25" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M8 8.25V12.5M1.75 12.5H6.75M9.25 12.5H14.25" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><circle cx="8" cy="12.5" r="1.25" stroke="currentColor" stroke-width="1.1" fill="none"/>"#);
+icon!(DISC, "disc", r#"<circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.2" fill="none"/><circle cx="8" cy="8" r="1.6" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M8 3.9A4.1 4.1 0 0 1 12.1 8" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" fill="none" opacity=".6"/>"#);
+
+/// The icon for a mounted volume in the location menu and pane header.
+pub fn volume(kind: filewinch_os::volumes::VolumeKind) -> &'static Icon {
+    use filewinch_os::volumes::VolumeKind as K;
+    match kind {
+        K::Internal => &DRIVE,
+        K::External => &DRIVE_EXTERNAL,
+        K::Network => &NETWORK_SHARE,
+        K::DiskImage | K::Optical => &DISC,
+    }
+}
+
 /// The icon for a protocol in the sidebar and pane header.
 pub fn protocol(p: Protocol) -> &'static Icon {
     match p {

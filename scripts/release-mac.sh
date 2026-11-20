@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Builds, signs, notarizes and staples the macOS release of Filewinch:
 #   dist/mac/Filewinch-<version>-macos-universal.dmg   (Filewinch.app, arm64 + x86_64, macOS 13+)
+#   dist/mac/symbols/<version>/<arch>/filewinch.dSYM    crash-report symbols; never shipped
 #
 # Usage (on a Mac with the Developer ID certificate in the login keychain):
 #   scripts/release-mac.sh 0.9.0                 build, sign, notarize, staple, verify
@@ -22,6 +23,8 @@
 #   FILEWINCH_MINISIGN_KEY  minisign secret key file; needed by --upload only when the release
 #                           already has SHA256SUMS.minisig (CI signed it), to re-sign the new sums
 #   CARGO_NET_OFFLINE=true  build without network access (dependencies already fetched)
+#   FILEWINCH_DIST_DIR      default dist/mac: where the .dmg, Filewinch.app and symbols/ go
+#                           (e.g. a scratch folder for a dry run while dist/mac's app is in use)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 root=$(pwd)
@@ -41,7 +44,7 @@ while [ $# -gt 0 ]; do
     --upload) upload=1 ;;
     --no-notarize) notarize=0 ;;
     --allow-dirty) allow_dirty=1 ;;
-    -h|--help) sed -n '2,26p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,27p' "$0"; exit 0 ;;
     -*) die "unknown option $1 (see --help)" ;;
     *) [ -z "$version" ] || die "one VERSION only (got '$version' and '$1')"; version=${1#v} ;;
   esac
@@ -53,7 +56,7 @@ done
 
 # --- preflight: everything that can fail fast, before a long build ----------------------------
 [ "$(uname -s)" = Darwin ] || die "run this on macOS"
-for tool in cargo rustup xcrun codesign lipo hdiutil ditto plutil shasum otool; do
+for tool in cargo rustup xcrun codesign lipo hdiutil ditto plutil shasum otool dwarfdump nm; do
   command -v "$tool" >/dev/null || die "$tool not found"
 done
 
@@ -104,7 +107,9 @@ if [ $upload = 1 ]; then
     die "no GitHub release v$version in $repo yet; push the tag and let the release workflow make the draft first"
 fi
 
-out_dir="$root/dist/mac"
+out_dir=${FILEWINCH_DIST_DIR:-"$root/dist/mac"}
+mkdir -p "$out_dir"
+out_dir=$(cd "$out_dir" && pwd)
 work="$out_dir/.build"
 rm -rf "$work"
 mkdir -p "$work"
@@ -113,12 +118,36 @@ cleanup() { if [ -n "$mounted" ]; then hdiutil detach "$mounted" -force >/dev/nu
 trap cleanup EXIT
 
 # --- build -------------------------------------------------------------------------------------
+# The release profile (root Cargo.toml) builds with fat LTO, line tables and split-debuginfo =
+# "packed": rustc links, runs dsymutil into filewinch.dSYM while the line tables still exist, and
+# only then strips the binary. The dSYMs go to dist/mac/symbols/<version>/<arch>/ for
+# symbolicating crash reports (atos, or Xcode, finds them by UUID); the app and DMG never hold them.
+symbols="$out_dir/symbols/$version"
+human() { awk -v b="$1" 'BEGIN { printf "%.1f MB (%d bytes)", b / 1000000, b }'; }
 slices=()
 for t in "${targets[@]}"; do
-  step "cargo build --release --target $t (MACOSX_DEPLOYMENT_TARGET=$min_macos)"
-  MACOSX_DEPLOYMENT_TARGET=$min_macos cargo build --release --locked -p filewinch-app --target "$t"
+  step "cargo build --release --target $t --no-default-features --features backends (MACOSX_DEPLOYMENT_TARGET=$min_macos)"
+  # Every backend, without the dev tools (headless snapshots, scenes, demo data): see the
+  # app's [features] in crates/filewinch-app/Cargo.toml.
+  MACOSX_DEPLOYMENT_TARGET=$min_macos cargo build --release --locked -p filewinch-app --target "$t" \
+    --no-default-features --features backends
   bin="$target_dir/$t/release/filewinch"
+  dsym="$target_dir/$t/release/filewinch.dSYM"
   [ -x "$bin" ] || die "build finished but $bin is missing"
+  [ -d "$dsym" ] || die "build finished but $dsym is missing (is [profile.release] split-debuginfo = \"packed\"?)"
+  # Stripped: no debug map (N_OSO/N_FUN stabs) and no local symbols left in the shipped binary.
+  if nm -ap "$bin" 2>/dev/null | awk '$2 == "-" || $2 ~ /^[tdbs]$/ {found=1; exit} END {exit !found}'; then
+    die "$bin still carries symbols; [profile.release] should have strip = \"symbols\""
+  fi
+  bin_uuid=$(dwarfdump --uuid "$bin" | awk '{print $2}')
+  dsym_uuid=$(dwarfdump --uuid "$dsym" | awk '{print $2}')
+  [ -n "$bin_uuid" ] && [ "$bin_uuid" = "$dsym_uuid" ] ||
+    die "$dsym (UUID ${dsym_uuid:-none}) doesn't belong to $bin (UUID ${bin_uuid:-none}); rebuild"
+  arch=$(lipo -archs "$bin")
+  rm -rf "$symbols/$arch"
+  mkdir -p "$symbols/$arch"
+  ditto "$dsym" "$symbols/$arch/filewinch.dSYM"
+  echo "$arch binary: $(human "$(stat -f %z "$bin")"), UUID $bin_uuid; symbols: $symbols/$arch/filewinch.dSYM"
   slices+=("$bin")
 done
 universal="$work/filewinch"
@@ -130,7 +159,7 @@ for arch in arm64 x86_64; do
   minos=$(otool -arch "$arch" -l "$universal" | awk '/LC_BUILD_VERSION/{f=1} f&&$1=="minos"{print $2; exit}')
   [ "$minos" = "$min_macos" ] || die "$arch slice targets macOS ${minos:-?}, expected $min_macos"
 done
-echo "universal binary: $(lipo -archs "$universal"), minos $min_macos"
+echo "universal binary: $(lipo -archs "$universal"), minos $min_macos, $(human "$(stat -f %z "$universal")")"
 
 # --- bundle ------------------------------------------------------------------------------------
 step "bundle Filewinch.app $version"
@@ -142,6 +171,13 @@ sed -e "s/@VERSION@/$version/g" -e "s/@YEAR@/$(date +%Y)/g" "$root/packaging/mac
 plutil -lint "$app/Contents/Info.plist" >/dev/null
 grep -q '@[A-Z]*@' "$app/Contents/Info.plist" && die "Info.plist has an unfilled placeholder"
 printf 'APPL????' >"$app/Contents/PkgInfo"
+# The bundle holds exactly these files (the signature adds Contents/_CodeSignature/CodeResources):
+# no AppleDouble ._ files, .DS_Store, debug symbols or stray resources.
+expected_app_files=$(printf '%s\n' Contents/Info.plist Contents/MacOS/filewinch Contents/PkgInfo Contents/Resources/Filewinch.icns)
+actual_app_files=$(cd "$app" && find . \( -type f -o -type l \) | sed 's|^\./||' | LC_ALL=C sort)
+[ "$actual_app_files" = "$expected_app_files" ] ||
+  die "Filewinch.app holds unexpected files: $(diff <(echo "$expected_app_files") <(echo "$actual_app_files") | grep '^[<>]' | tr '\n' ' ')"
+xattr -cr "$app"
 
 # --- sign, inside out (no --deep) --------------------------------------------------------------
 step "sign with $identity"
@@ -236,7 +272,12 @@ if kill -0 $layout 2>/dev/null; then
 fi
 wait $layout || die "Finder couldn't lay out the disk image: $(cat "$work/layout.log"). Allow your terminal to control Finder in System Settings > Privacy & Security > Automation, then run again."
 [ -f /Volumes/Filewinch/.DS_Store ] || die "Finder saved no window layout in the disk image"
-rm -rf /Volumes/Filewinch/.fseventsd /Volumes/Filewinch/.Trashes
+# Only Filewinch.app, the Applications link, .background/background.tiff and Finder's .DS_Store
+# go in: drop what macOS writes on a mounted volume (event logs, trash, Spotlight index, temp
+# items) and any AppleDouble ._ files.
+rm -rf /Volumes/Filewinch/.fseventsd /Volumes/Filewinch/.Trashes /Volumes/Filewinch/.Spotlight-V100 \
+  /Volumes/Filewinch/.TemporaryItems /Volumes/Filewinch/__MACOSX
+find /Volumes/Filewinch -name '._*' -delete
 sync
 for attempt in 1 2 3 4 5; do
   hdiutil detach "$mounted" -quiet && { mounted=""; break; }
@@ -247,7 +288,36 @@ done
 suffix=""; [ $notarize = 1 ] || suffix="-unnotarized"
 dmg="$out_dir/Filewinch-$version-macos-universal$suffix.dmg"
 rm -f "$dmg"
-hdiutil convert -quiet "$work/rw.dmg" -format UDZO -imagekey zlib-level=9 -o "$dmg"
+# LZMA (ULMO): the smallest of hdiutil's formats; macOS 10.15 and later open it (we need 13).
+hdiutil convert -quiet "$work/rw.dmg" -format ULMO -o "$dmg"
+rm -f "$work/rw.dmg"
+
+# What a user sees, hidden files included: exactly the app, the link, the background and the
+# layout. The mount is read-only and hidden from Finder. (hdiutil refuses a -mountpoint outside
+# /Volumes on some setups, so it mounts at /Volumes/Filewinch, which was checked free above.)
+# Right after hdiutil convert the new image can be busy for a moment (a scan); try a few times.
+check_mount=""
+for attempt in 1 2 3 4 5; do
+  if attach_out=$(hdiutil attach -readonly -nobrowse -noautoopen "$dmg" 2>&1); then
+    check_mount=$(awk -F'\t' '/Apple_HFS/{print $NF}' <<<"$attach_out")
+    [ -n "$check_mount" ] && [ -d "$check_mount" ] && break
+  fi
+  check_mount=""
+  sleep $((attempt * 2))
+done
+[ -n "$check_mount" ] || die "couldn't mount $dmg to check its contents: $attach_out"
+mounted="$check_mount"
+echo "disk image contents:"
+ls -la "$check_mount"
+top=$(cd "$check_mount" && ls -A | LC_ALL=C sort | tr '\n' ' ')
+[ "$top" = ".DS_Store .background Applications Filewinch.app " ] || die "the disk image holds unexpected files: $top"
+[ "$(cd "$check_mount/.background" && ls -A)" = background.tiff ] || die "the disk image's .background holds more than background.tiff"
+[ "$(readlink "$check_mount/Applications")" = /Applications ] || die "the disk image's Applications isn't a link to /Applications"
+stray=$(find "$check_mount" \( -name '._*' -o -name '.DS_Store' -o -name '*.dSYM' \) ! -path "$check_mount/.DS_Store" -print)
+[ -z "$stray" ] || die "the disk image holds stray files: $stray"
+codesign --verify --deep --strict "$check_mount/Filewinch.app" || die "the app inside the disk image fails codesign --verify"
+hdiutil detach "$check_mount" -quiet || hdiutil detach "$check_mount" -force -quiet
+mounted=""
 codesign --force --timestamp --sign "$identity" "$dmg"
 codesign --verify --strict --verbose=2 "$dmg"
 
@@ -267,6 +337,8 @@ else
 fi
 sum=$(cd "$out_dir" && shasum -a 256 "$(basename "$dmg")")
 echo "$sum"
+echo "sizes: universal binary $(human "$(stat -f %z "$app/Contents/MacOS/filewinch")"), Filewinch.app $(du -sk "$app" | awk '{print $1}') KiB on disk, disk image $(human "$(stat -f %z "$dmg")")"
+echo "symbols (keep, don't ship): $symbols"
 echo "wrote $dmg"
 
 # --- upload ------------------------------------------------------------------------------------

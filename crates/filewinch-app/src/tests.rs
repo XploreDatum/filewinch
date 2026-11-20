@@ -451,3 +451,62 @@ fn rows_rebuild_in_the_dark_kit_when_the_appearance_flips() {
     rt.frame(1.0 / 60.0);
     assert_eq!(name_color(&rt), crate::theme::kit(true).c.text_base, "cached rows rebuild with the dark kit's text colour");
 }
+
+fn scene_ui(name: &str) -> Ui {
+    let mut ui = Ui::new();
+    let (_, f) = crate::scenes::SCENES.iter().find(|(n, _)| *n == name).expect("scene");
+    f(&mut ui);
+    ui
+}
+
+#[test]
+fn files_at_once_control_shows_for_multi_file_jobs_only() {
+    let mut rt = runtime(scene_ui("transfers-folder"));
+    rt.frame(0.1);
+    let tree = rt.accessibility_json().to_string();
+    // Counting (3) and known totals (6): both have it; the single large file doesn't.
+    assert!(tree.contains("Files at a time, 3"), "counting job");
+    assert!(tree.contains("Files at a time, 6"), "running job");
+    assert_eq!(tree.matches("Files at a time").count(), 2, "not on the single-file job");
+}
+
+#[test]
+fn progress_text_while_counting_and_with_totals() {
+    use crate::transfers::model::Row;
+    use crate::transfers::view::{detail_line, header_line};
+    let ui = scene_ui("transfers-folder");
+    let rows: Vec<&Row> = ui.transfers.rows.iter().collect();
+    let (known, counting, single) = (rows[0], rows[1], rows[2]);
+    assert_eq!(header_line(counting), "Downloading 11 of 12+ to “untitled folder”");
+    assert_eq!(detail_line(counting), "245 MB · counting… · 6.3 MB/s");
+    assert!(counting.counting() && counting.fraction().is_none(), "an indeterminate bar");
+    assert_eq!(header_line(known), "Downloading 9 of 24 to “Downloads”");
+    assert_eq!(detail_line(known), "88 MB of 22 GB · 25 min left · 13 MB/s");
+    assert!(!known.counting());
+    assert_eq!(header_line(single), single.label, "a single file keeps its label");
+    assert!(!single.many_files() && counting.many_files() && known.many_files());
+}
+
+#[test]
+fn inline_rows_show_moving_files_with_skip_labels_and_not_for_single_files() {
+    let mut rt = runtime(scene_ui("transfers-folder"));
+    rt.frame(0.1);
+    let tree = rt.accessibility_json().to_string();
+    assert!(tree.contains("Skip Friends.S01E05.The.One.With.The.East.German.Laundry.Detergent.1080p.BluRay.x264.mkv, 45% downloaded"), "pie label");
+    assert!(tree.contains("connecting…"), "a file still connecting says so");
+    assert!(tree.contains("retrying in 5 seconds") || tree.contains("retrying in 4 seconds"), "a retrying file says when");
+    assert!(tree.contains("Downloading now (4)") && tree.contains("Queued (3)") && tree.contains("Skipped (1)"), "grouped list");
+    assert!(tree.contains("Done (4)"), "done is listed (collapsed)");
+    assert!(!tree.contains("site-2026-11.tar, "), "no inline row for the single file");
+}
+
+#[test]
+fn finished_jobs_sum_up_their_items() {
+    use crate::transfers::engine::{ItemCounts, JobState};
+    use crate::transfers::view::summary_line;
+    let mut ui = scene_ui("transfers-folder");
+    let r = &mut ui.transfers.rows[0];
+    r.state = JobState::Done;
+    r.items.counts = ItemCounts { done: 84, skipped: 2, failed: 1, ..ItemCounts::default() };
+    assert_eq!(summary_line(r).as_deref(), Some("84 downloaded, 2 skipped, 1 failed"));
+}

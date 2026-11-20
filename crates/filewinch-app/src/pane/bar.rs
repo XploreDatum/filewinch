@@ -72,42 +72,15 @@ impl Ui {
         });
     }
 
-    fn source_menu(&mut self, p: usize, tx: &mut Tx) {
-        let mut menu = PopupMenu::new().item(PopupItem::new("local", crate::theme::ui_os().this_computer()).checked(self.panes[p].is_local()));
-        for s in &self.sessions {
-            menu = menu.item(PopupItem::new(format!("s:{}", s.id), s.site.name.clone()).checked(self.panes[p].session() == Some(s.id)));
+    /// Shows connected session `id` in pane `p`, at its home folder.
+    pub fn show_session(&mut self, p: usize, id: u64) {
+        let hidden = self.prefs.show_hidden;
+        if let Some(sess) = self.session(id) {
+            let src = crate::pane::Source { session: id, label: sess.site.name.clone(), protocol: sess.site.protocol, remote: sess.remote.clone() };
+            let home = src.remote.home().unwrap_or_else(|_| RPath::root());
+            self.panes[p].switch_to(src, home, hidden);
+            self.active = p;
         }
-        let fav = self.sites.favorites.iter().filter(|f| !self.sessions.iter().any(|s| s.site.id == f.site.id)).take(12);
-        let mut sites = PopupMenu::new();
-        let mut any = false;
-        for f in fav {
-            any = true;
-            sites = sites.item(PopupItem::new(format!("f:{}", f.site.id), f.site.name.clone()));
-        }
-        menu = menu.separator().submenu_enabled("Connect to Favorite", sites, any).item(PopupItem::new("new", "New Connection…"));
-        if !self.panes[p].is_local() && !self.panes[p].is_empty() {
-            menu = menu.separator().item(PopupItem::new("disconnect", "Disconnect"));
-        }
-        tx.popup_menu(menu, format!("source-{p}"), move |s: &mut Ui, picked, _tx: &mut Tx| {
-            let Some(id) = picked else { return };
-            let hidden = s.prefs.show_hidden;
-            if id == "local" && !s.panes[p].is_local() {
-                s.show_local(p);
-            } else if let Some(n) = id.strip_prefix("s:").and_then(|n| n.parse::<u64>().ok()) {
-                if let Some(sess) = s.session(n) {
-                    let src = crate::pane::Source { session: n, label: sess.site.name.clone(), protocol: sess.site.protocol, remote: sess.remote.clone() };
-                    let home = src.remote.home().unwrap_or_else(|_| RPath::root());
-                    s.panes[p].switch_to(src, home, hidden);
-                    s.active = p;
-                }
-            } else if let Some(fid) = id.strip_prefix("f:") {
-                s.connect_favorite(fid, p);
-            } else if id == "new" {
-                s.open_connect_in(p);
-            } else if id == "disconnect" {
-                s.disconnect(p);
-            }
-        });
     }
 }
 
@@ -219,9 +192,12 @@ fn filter(s: &Ui, p: usize, k: &Kit) -> El {
         .key(format!("filter-{p}"))
 }
 
-fn source_header(s: &Ui, p: usize, k: &Kit, paint: &Paint) -> El {
+fn source_header(s: &Ui, p: usize, k: &Kit, paint: &Paint, layer: &mut Vec<El>) -> El {
     let pane = &s.panes[p];
     let active = s.active == p;
+    // Inside an external disk, a share or a disk image, the header names it instead of This Mac.
+    let volume = s.shown_volume(p);
+    let title = volume.map_or(pane.label(), |v| v.name.as_str()).to_owned();
     let detail = match pane.session().and_then(|id| s.session(id)) {
         // Cloud drives have no host; show the account instead, or just the protocol.
         Some(sess) => {
@@ -234,20 +210,22 @@ fn source_header(s: &Ui, p: usize, k: &Kit, paint: &Paint) -> El {
             }
         }
         None if pane.is_empty() => format!("Choose a server or {}", crate::theme::ui_os().this_computer()),
-        None => "Local disk".to_owned(),
+        None => volume.map_or("Local disk", |v| v.kind.describe()).to_owned(),
     };
-    let glyph = match &pane.src {
-        Some(src) => icons::protocol(src.protocol),
-        None => &icons::SERVER,
+    let glyph = match (&pane.src, volume) {
+        (_, Some(v)) => icons::volume(v.kind),
+        (Some(src), None) => icons::protocol(src.protocol),
+        (None, None) => &icons::SERVER,
     };
-    let chip = row().key(format!("source-{p}")).role("button").label(format!("{} pane: {}. Change location", if p == 0 { "Left" } else { "Right" }, pane.label()))
-        .expanded(false).h(30.0).px(8.0).gap(8.0).center_y().radius(6.0).hover(k.c.hover).min_w(0.0).shrink()
-        .on_press_tx(move |s: &mut Ui, tx: &mut Tx| s.source_menu(p, tx))
+    let chip = row().key(format!("source-{p}")).role("button").label(format!("{} pane: {title}. Change location", if p == 0 { "Left" } else { "Right" }))
+        .h(30.0).px(8.0).gap(8.0).center_y().radius(6.0).hover(k.c.hover).min_w(0.0).shrink()
+        .on_press(move |s: &mut Ui| s.open_source_menu(p))
         .child(icon(glyph, 16.0).color(if active { paint.accent } else { k.c.icon_muted }).a11y_hidden())
         .child(col().min_w(0.0).a11y_hidden()
-            .child(text(pane.label().to_owned()).font(k.ty.text_small_medium).color(k.c.text_strong).truncate())
-            .child(text(detail).font(k.ty.text_xsmall).color(k.c.text_muted).truncate()))
+            .child(text(title).key("source-title").font(k.ty.text_small_medium).color(k.c.text_strong).truncate())
+            .child(text(detail).key("source-detail").font(k.ty.text_xsmall).color(k.c.text_muted).truncate()))
         .child(icon(k.glyph.chevron_down, 14.0).color(k.c.icon_faint).a11y_hidden());
+    let chip = super::source_menu::menu(s, p, chip, k, layer);
     let mut r = row().w_full().h(40.0).px(6.0).gap(4.0).center_y().child(chip).child(rune::el().grow(1.0));
     if pane.is_loading() && !pane.entries.is_empty() {
         r = r.child(Spinner::new().size(14.0).build(k).label("Refreshing"));
@@ -259,13 +237,13 @@ fn source_header(s: &Ui, p: usize, k: &Kit, paint: &Paint) -> El {
 }
 
 /// One whole pane.
-pub fn pane(s: &Ui, p: usize, k: &Kit, paint: &Paint, cx: &mut Cx<Ui>) -> El {
+pub fn pane(s: &Ui, p: usize, k: &Kit, paint: &Paint, cx: &mut Cx<Ui>, layer: &mut Vec<El>) -> El {
     let pane = &s.panes[p];
     let active = s.active == p;
     let frame = col().key(format!("pane-box-{p}")).role("region").label(format!("{} pane", if p == 0 { "Left" } else { "Right" }))
         .grow(1.0).w(0.0).min_w(300.0).h_full().min_h(0.0)
         .fill(paint.list).radius(k.radius.lg).border(1.0, if active { k.alpha(paint.accent, 0.55) } else { paint.hair }).clip_soft(0.0)
-        .child(source_header(s, p, k, paint));
+        .child(source_header(s, p, k, paint, layer));
     let status = |label: String| row().key(format!("status-{p}")).w_full().h(22.0).px(12.0).center_y().border_sides([1.0, 0.0, 0.0, 0.0], paint.hair)
         .child(text(label).font(k.ty.text_xsmall).color(k.c.text_muted).truncate().live_region(rune::LiveRegion::Polite));
     if pane.is_empty() {

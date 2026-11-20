@@ -125,6 +125,8 @@ impl Ui {
             Key::Command('[') => self.go_back(p),
             Key::Command(']') => self.go_forward(p),
             Key::Command('o') => self.open_selection(p),
+            // The right pane's Tab moves on to the Inspector when it's open (Esc there comes back).
+            Key::Tab if !m.cmd && !m.shift && p == 1 && self.prefs.inspector_open => tx.focus(crate::inspector::FOCUS_KEY, true),
             Key::Tab if !m.cmd => {
                 let other = self.other(p);
                 self.active = other;

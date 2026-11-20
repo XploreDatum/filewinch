@@ -65,6 +65,9 @@ pub struct Form {
     pub trusted: Vec<String>,
     /// The pane the connection opens in; `None` picks an empty pane, else the active one.
     pub pane: Option<usize>,
+    /// Saved Servers: the filter, and the row that holds the list's Tab stop.
+    pub saved_filter: TextEdit,
+    pub saved_cursor: usize,
 }
 
 impl Form {
@@ -98,6 +101,8 @@ impl Form {
             suggestions: Vec::new(),
             trusted: Vec::new(),
             pane: None,
+            saved_filter: TextEdit::new(""),
+            saved_cursor: 0,
         }
     }
 

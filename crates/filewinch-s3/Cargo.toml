@@ -21,4 +21,5 @@ httpdate = "1"
 
 [dev-dependencies]
 filewinch-testkit = { path = "../filewinch-testkit" }
+filewinch-engine = { path = "../filewinch-engine" }
 md5 = "0.8"

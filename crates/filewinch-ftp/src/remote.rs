@@ -3,7 +3,7 @@
 
 use crate::conn::{self, Features, Ftp, Params, ftp_err};
 use crate::list::{format_timeval, parse_list_line, parse_mlsd_line};
-use crate::MAX_CONNECTIONS;
+use crate::{MAX_CONNECTIONS, MAX_SEGMENT_CONNECTIONS};
 use filewinch_core::{Caps, Entry, EntryKind, Error, ErrorKind, RPath, Remote, Result, WriteSink};
 use std::any::Any;
 use std::io::{self, Read, Write};
@@ -64,6 +64,18 @@ impl Drop for Lease {
 
 impl Pool {
     fn take(self: &Arc<Self>) -> Result<Lease> {
+        self.take_upto(MAX_CONNECTIONS, false)
+    }
+
+    /// A connection for one piece of a segmented download, growing the pool up to
+    /// [`MAX_SEGMENT_CONNECTIONS`]. A server that refuses the extra connection (421 "too many
+    /// connections", or a login refused on a second connection) answers
+    /// [`Error::too_many_connections`], so the engine falls back to one connection.
+    fn take_ranged(self: &Arc<Self>) -> Result<Lease> {
+        self.take_upto(MAX_SEGMENT_CONNECTIONS, true)
+    }
+
+    fn take_upto(self: &Arc<Self>, cap: usize, ranged: bool) -> Result<Lease> {
         let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
         loop {
             if self.closed.load(Ordering::SeqCst) {
@@ -82,15 +94,17 @@ impl Pool {
                 }
                 return Ok(Lease { ftp: Some(ftp), pool: self.clone(), broken: false });
             }
-            if s.open < MAX_CONNECTIONS {
+            if s.open < cap {
                 s.open += 1;
+                let others = s.open > 1;
                 drop(s);
                 return match conn::open(&self.params) {
                     Ok((ftp, _)) => Ok(Lease { ftp: Some(ftp), pool: self.clone(), broken: false }),
                     Err(e) => {
                         self.state.lock().unwrap_or_else(|x| x.into_inner()).open -= 1;
                         self.cv.notify_one();
-                        Err(e)
+                        let refused = matches!(e.kind, ErrorKind::Auth | ErrorKind::Network);
+                        Err(if ranged && others && refused { Error::too_many_connections(e) } else { e })
                     }
                 };
             }
@@ -219,6 +233,41 @@ impl Drop for Transfer {
     }
 }
 
+impl Transfer {
+    /// Ends a download before the file's end: ABOR, then a NOOP to prove the control
+    /// connection is back in step (a server that had already finished answers twice). If
+    /// either fails, the connection is dropped instead of going back to the pool.
+    fn stop_early(&mut self) {
+        let Some(x) = self.xfer.take() else { return };
+        let ftp: &mut dyn Any = self.lease.ftp();
+        let clean = x.abort(ftp).is_ok() && self.lease.ftp().noop().is_ok();
+        if !clean {
+            self.lease.broken = true;
+        }
+    }
+}
+
+/// Exactly `left` bytes of a download, then a clean stop (see [`Transfer::stop_early`]).
+struct RangeRead {
+    t: Transfer,
+    left: u64,
+}
+
+impl Read for RangeRead {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if self.left == 0 || buf.is_empty() {
+            return Ok(0);
+        }
+        let want = buf.len().min(usize::try_from(self.left).unwrap_or(usize::MAX));
+        let n = self.t.read(&mut buf[..want])?;
+        self.left = self.left.saturating_sub(n as u64);
+        if self.left == 0 {
+            self.t.stop_early();
+        }
+        Ok(n)
+    }
+}
+
 impl Read for Transfer {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let Some(x) = self.xfer.as_mut() else { return Ok(0) };
@@ -265,6 +314,7 @@ impl Remote for FtpRemote {
             real_dirs: true,
             server_rename: true,
             server_copy: false,
+            ranged_reads: self.feat.rest,
         }
     }
 
@@ -341,6 +391,26 @@ impl Remote for FtpRemote {
             Err(e) => {
                 lease.broken = matches!(e, FtpError::ConnectionError(_));
                 Err(ftp_err(e, &what, &self.pool.params.host))
+            }
+        }
+    }
+
+    fn read_range(&self, path: &RPath, offset: u64, len: u64) -> Result<Box<dyn Read + Send>> {
+        let what = format!("download {}", q(path));
+        let mut lease = self.pool.take_ranged()?;
+        let ftp = lease.ftp();
+        let p = path.as_str();
+        let opened = (|| {
+            ftp.resume_transfer(offset as usize)?;
+            ftp.retr_as_stream(p)
+        })();
+        match opened {
+            Ok(s) => Ok(Box::new(RangeRead { t: Transfer { xfer: Some(Box::new(s)), lease, what, verify: None }, left: len })),
+            Err(e) => {
+                lease.broken = matches!(e, FtpError::ConnectionError(_));
+                let err = ftp_err(e, &what, &self.pool.params.host);
+                // 421 mid-session: the server is shedding connections.
+                Err(if err.detail.as_deref().is_some_and(|d| d.starts_with("421")) { Error::too_many_connections(err) } else { err })
             }
         }
     }

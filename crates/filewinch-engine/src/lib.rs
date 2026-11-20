@@ -16,7 +16,18 @@
 //!   [`JobState::Failed`] with a summary if any item failed.
 //! - Conflicts follow the job's [`ConflictPolicy`]; with [`ConflictPolicy::Ask`] the job parks
 //!   in [`JobState::WaitingForAnswer`] and emits [`Event::Conflict`] until [`Engine::answer`].
-//! - One bandwidth limit (token bucket) is shared by all jobs.
+//! - Large downloads to a destination that takes positional writes (the local disk) use up to
+//!   `segments_per_file` connections at once when the source has [`Caps::ranged_reads`]:
+//!   files of 16 MB or more, at least 4 MB per connection. Pieces go into a hidden
+//!   `.name.filewinch-part` with a `.name.filewinch-ranges` sidecar of finished ranges, so a
+//!   pause, a failure, a retry or an app restart continues from them; the file is renamed into
+//!   place (conflict policy applied then) once complete, its size and any server checksum
+//!   checked. A server that refuses the extra connections (too many connections, rate limits,
+//!   an ignored range, auth errors on the extra connections) gets one connection for the rest
+//!   of the session; the download finishes over one connection and [`Engine::notes`] says
+//!   why. A cancel or [`Engine::forget`] deletes the temp files; dropping the engine keeps
+//!   them.
+//! - One bandwidth limit (token bucket) is shared by all jobs (and every segment).
 //! - Progress is throttled to about ten events a second per job, with a smoothed speed and ETA.
 //!
 //! Backends that surface errors through `std::io::Read`/`Write` should wrap a
@@ -41,12 +52,16 @@
 
 mod control;
 mod hash;
+mod items;
 mod meter;
 mod runner;
+mod segment;
+mod sidecar;
 mod sync;
 mod transfer;
 mod walk;
 
+pub use items::{ActivePhase, ItemCounts, ItemFilter, ItemState, ItemView};
 pub use sync::{
     CancelToken, CompareBy, CompareProgress, SyncAction, SyncActionKind, SyncConflict, SyncDirection,
     SyncOptions, SyncPlan, apply, compare, compare_with,
@@ -56,13 +71,16 @@ use control::{Bucket, JobCtl};
 use filewinch_core::{Entry, Error, ErrorKind, RPath, Remote};
 use meter::Meter;
 use std::collections::{BTreeMap, HashSet, VecDeque};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
 
 #[cfg(doc)]
 use filewinch_core::{Caps, WriteSink};
 
 pub type JobId = u64;
+
+/// The most files one job can be set to move at once while it runs ([`Engine::set_job_files`]).
+pub const MAX_FILES_PER_JOB_LIVE: usize = 16;
 
 /// What to do when the destination already has an item with the same name.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -88,6 +106,22 @@ pub enum Op {
     Move,
     /// Deletes `src_paths` recursively. `dst` and `dst_dir` are ignored.
     Delete,
+    /// Changes Unix permissions of `src_paths` and everything inside them (folders are listed
+    /// first, then changed, so taking away read access never blocks the walk). Only the bits
+    /// in `mask` change: new = (old & !mask) | (mode & mask). With `dirs_get_x_where_r`,
+    /// folders also get execute wherever the result has read (within `mask`), like chmod's
+    /// `X`. Symbolic links are left alone. `dst` and `dst_dir` are ignored. Fails at once with
+    /// a clear error when the remote can't set permissions ([`Caps::permissions`]).
+    SetMode { mode: u32, mask: u32, dirs_get_x_where_r: bool },
+}
+
+/// The mode [`Op::SetMode`] gives an item whose current mode is `old`.
+pub fn applied_mode(old: u32, is_dir: bool, mode: u32, mask: u32, dirs_get_x_where_r: bool) -> u32 {
+    let mut new = (old & !mask) | (mode & mask);
+    if is_dir && dirs_get_x_where_r {
+        new |= ((new & 0o444) >> 2) & mask;
+    }
+    new & 0o7777
 }
 
 /// One unit of work in the queue.
@@ -164,6 +198,10 @@ pub struct Progress {
     pub files_total: Option<u64>,
     /// The file most recently started.
     pub current: Option<RPath>,
+    /// Files and bytes found so far: while scanning (totals still `None`) they grow; after,
+    /// they equal the totals.
+    pub files_found: u64,
+    pub bytes_found: u64,
     /// Smoothed transfer speed.
     pub bytes_per_sec: f64,
     pub eta: Option<Duration>,
@@ -205,6 +243,17 @@ pub enum Event {
     Progress(JobId, Progress),
     Conflict { job: JobId, ask: ConflictAsk },
     ItemFailed { job: JobId, path: RPath, error: Error },
+    /// A worker took up one file: `path` is where it's written (Copy, Move) or the file being
+    /// removed (Delete), before conflict handling renames anything. For live folder views.
+    ItemStarted { job: JobId, path: RPath, size: Option<u64> },
+    /// That file was written, moved, deleted or failed (a failure also has
+    /// [`Event::ItemFailed`]); a skipped file has no `ItemDone` (it leaves the active items,
+    /// see [`Event::ItemsChanged`]). `path` as in [`Event::ItemStarted`]; `from` is a Move's
+    /// source, which may be gone now.
+    ItemDone { job: JobId, path: RPath, from: Option<RPath> },
+    /// The job's per-item list changed; pull it with [`Engine::items`] (about four a second at
+    /// most per job, see `items`).
+    ItemsChanged(JobId),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -221,17 +270,21 @@ pub struct EngineConfig {
     pub bandwidth_limit: Option<u64>,
     /// First retry delay; doubles each attempt (capped at 60 s), with ±25 % jitter.
     pub retry_delay: Duration,
+    /// Connections one large download may use at once (1 turns segmenting off). Applies only
+    /// where the source has [`Caps::ranged_reads`] and the destination takes positional writes.
+    pub segments_per_file: usize,
 }
 
 impl Default for EngineConfig {
     fn default() -> Self {
         EngineConfig {
             max_jobs: 2,
-            max_files_per_job: 4,
+            max_files_per_job: 3,
             retries: 5,
             chunk: 256 * 1024,
             bandwidth_limit: None,
             retry_delay: Duration::from_secs(1),
+            segments_per_file: 3,
         }
     }
 }
@@ -254,6 +307,13 @@ struct JobRec {
     meter: Arc<Meter>,
     /// Source files finished in earlier runs; [`Engine::retry`] skips them.
     done: Arc<Mutex<HashSet<RPath>>>,
+    /// Things worth telling the person that didn't fail the job (e.g. why a download fell back
+    /// to one connection).
+    notes: Arc<Mutex<Vec<String>>>,
+    items: Arc<items::Items>,
+    /// Temp files of segmented downloads this job left on its destination (for resume);
+    /// [`Engine::forget`] deletes them.
+    partials: Arc<Mutex<HashSet<RPath>>>,
 }
 
 struct Shared {
@@ -268,6 +328,8 @@ pub(crate) struct Inner {
     shared: Mutex<Shared>,
     emit: Box<dyn Fn(Event) + Send + Sync>,
     pub(crate) bucket: Bucket,
+    /// Sessions that refused extra connections: their downloads use one connection.
+    single: Mutex<Vec<Weak<dyn Remote>>>,
 }
 
 /// The transfer queue. Dropping it cancels every job.
@@ -289,6 +351,7 @@ impl Engine {
                 }),
                 emit: Box::new(on_event),
                 bucket,
+                single: Mutex::new(Vec::new()),
             }),
         }
     }
@@ -307,6 +370,9 @@ impl Engine {
                     ctl: Arc::new(JobCtl::default()),
                     meter: Arc::new(Meter::default()),
                     done: Arc::default(),
+                    notes: Arc::default(),
+                    items: Arc::default(),
+                    partials: Arc::default(),
                 },
             );
             s.queue.push_back(id);
@@ -364,12 +430,37 @@ impl Engine {
                 _ => return,
             }
             r.phase = Phase::Queued;
+            let limit = r.ctl.files_limit();
             r.ctl = Arc::new(JobCtl::default());
+            if limit > 0 {
+                r.ctl.set_files_limit(limit);
+            }
             r.meter = Arc::new(Meter::default());
             s.queue.push_back(id);
         }
         self.inner.refresh(id);
         Inner::schedule(&self.inner);
+    }
+
+    /// Sets how many files job `id` moves at once (1 to [`MAX_FILES_PER_JOB_LIVE`], or the
+    /// config's value if that is higher), effective at once: a higher number starts more files
+    /// now; a lower one lets the files in flight finish and starts none until fewer are moving.
+    /// Nothing is cancelled. Works on queued jobs too.
+    pub fn set_job_files(&self, id: JobId, n: usize) {
+        let cap = self.inner.lock().cfg.max_files_per_job.max(MAX_FILES_PER_JOB_LIVE);
+        if let Some(ctl) = self.inner.ctl(id) {
+            ctl.set_files_limit(n.clamp(1, cap));
+        }
+    }
+
+    /// The files-at-once limit of job `id`: its own if set, else the config's.
+    pub fn job_files(&self, id: JobId) -> Option<usize> {
+        let s = self.inner.lock();
+        let r = s.jobs.get(&id)?;
+        Some(match r.ctl.files_limit() {
+            0 => s.cfg.max_files_per_job.max(1),
+            n => n,
+        })
     }
 
     /// Answers the open conflict question of job `id`. Ignored when nothing is being asked.
@@ -399,16 +490,69 @@ impl Engine {
             .collect()
     }
 
-    /// Drops a finished job from the list (the "clear" button). Returns false if it is still
-    /// queued or running.
+    /// Drops a finished job from the list (the "clear" button) and deletes the partial
+    /// downloads it kept for resuming. Returns false if it is still queued or running.
     pub fn forget(&self, id: JobId) -> bool {
-        let mut s = self.inner.lock();
-        if s.jobs.get(&id).is_some_and(|r| matches!(r.phase, Phase::Finished(_))) {
-            s.jobs.remove(&id);
-            true
-        } else {
-            false
+        let rec = {
+            let mut s = self.inner.lock();
+            if !s.jobs.get(&id).is_some_and(|r| matches!(r.phase, Phase::Finished(_))) {
+                return false;
+            }
+            s.jobs.remove(&id)
+        };
+        let Some(rec) = rec else { return true };
+        let partials: Vec<RPath> = rec.partials.lock().unwrap_or_else(|e| e.into_inner()).drain().collect();
+        if let (Some(dst), false) = (rec.job.dst.clone(), partials.is_empty()) {
+            // Off the caller's thread: the caller is usually the UI.
+            let _ = std::thread::Builder::new().name("filewinch-forget".into()).spawn(move || {
+                for temp in partials {
+                    sidecar::remove(&*dst, &sidecar::Names::of_temp(&temp));
+                }
+            });
         }
+        true
+    }
+
+    /// Job `id`'s items in `filter` (files and folders, in the order found): how many there
+    /// are, and those in `range` (for the rows on screen). Folders take their state from what's
+    /// inside them.
+    pub fn items(&self, id: JobId, filter: ItemFilter, range: std::ops::Range<usize>) -> (usize, Vec<ItemView>) {
+        let items = self.inner.lock().jobs.get(&id).map(|r| r.items.clone());
+        items.map_or((0, Vec::new()), |i| i.page(filter, range))
+    }
+
+    /// How many of job `id`'s files are running, queued, done, failed and skipped.
+    pub fn item_counts(&self, id: JobId) -> ItemCounts {
+        let items = self.inner.lock().jobs.get(&id).map(|r| r.items.clone());
+        items.map(|i| i.counts()).unwrap_or_default()
+    }
+
+    /// Skips one item of job `id` without stopping the rest: a running file stops at its next
+    /// chunk and its partial (or segmented temp) file is deleted, freeing its slot for the next
+    /// file; a queued one never starts; a folder skips everything in it, including what the
+    /// walk hasn't found yet. A skipped item never fails the job. Returns false when there was
+    /// nothing to skip (unknown, or already finished: a file that lands anyway counts as done).
+    pub fn skip_item(&self, id: JobId, path: &RPath) -> bool {
+        let found = {
+            let s = self.inner.lock();
+            s.jobs.get(&id).map(|r| (r.items.clone(), r.ctl.clone()))
+        };
+        let Some((items, ctl)) = found else { return false };
+        let skipped = items.skip(path) == items::Skip::Skipped;
+        if skipped {
+            ctl.poke();
+            if items.take_event(false) {
+                self.inner.emit(Event::ItemsChanged(id));
+            }
+        }
+        skipped
+    }
+
+    /// Notes about job `id` that didn't fail it, oldest first: for example that a download
+    /// fell back to one connection, and why.
+    pub fn notes(&self, id: JobId) -> Vec<String> {
+        let notes = self.inner.lock().jobs.get(&id).map(|r| r.notes.clone());
+        notes.map(|n| n.lock().unwrap_or_else(|e| e.into_inner()).clone()).unwrap_or_default()
     }
 }
 
@@ -416,7 +560,7 @@ impl Drop for Engine {
     fn drop(&mut self) {
         let s = self.inner.lock();
         for r in s.jobs.values() {
-            r.ctl.cancel();
+            r.ctl.shutdown();
         }
     }
 }
@@ -424,6 +568,20 @@ impl Drop for Engine {
 impl Inner {
     fn lock(&self) -> std::sync::MutexGuard<'_, Shared> {
         self.shared.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// True when `r` refused extra connections earlier in this session.
+    pub(crate) fn is_single(&self, r: &Arc<dyn Remote>) -> bool {
+        let p = Arc::as_ptr(r) as *const ();
+        self.single.lock().unwrap_or_else(|e| e.into_inner()).iter().any(|w| w.as_ptr() as *const () == p && w.strong_count() > 0)
+    }
+
+    pub(crate) fn set_single(&self, r: &Arc<dyn Remote>) {
+        let mut v = self.single.lock().unwrap_or_else(|e| e.into_inner());
+        v.retain(|w| w.strong_count() > 0);
+        if !v.iter().any(|w| w.as_ptr() as *const () == Arc::as_ptr(r) as *const ()) {
+            v.push(Arc::downgrade(r));
+        }
     }
 
     fn ctl(&self, id: JobId) -> Option<Arc<JobCtl>> {
@@ -497,18 +655,21 @@ impl Inner {
                 let cfg = s.cfg.clone();
                 let r = s.jobs.get_mut(&id).expect("queued jobs exist");
                 r.phase = Phase::Scanning;
-                (id, r.job.clone(), r.ctl.clone(), r.meter.clone(), r.done.clone(), cfg)
+                (id, r.job.clone(), r.ctl.clone(), r.meter.clone(), r.done.clone(), r.notes.clone(), r.items.clone(), r.partials.clone(), cfg)
             };
-            let (id, job, ctl, meter, done, cfg) = start;
+            let (id, job, ctl, meter, done, notes, items, partials, cfg) = start;
             this.refresh(id);
             let inner = this.clone();
             let spawned = std::thread::Builder::new()
                 .name(format!("filewinch-job-{id}"))
                 .spawn(move || {
-                    let ctx = runner::JobCtx { inner: inner.clone(), id, job, ctl, meter, done, cfg };
+                    let ctx = runner::JobCtx { inner: inner.clone(), id, job, ctl, meter, done, notes, items, partials, cfg };
                     let end = runner::run(&ctx);
                     if let Some(p) = ctx.meter.force_sample() {
                         inner.emit(Event::Progress(id, p));
+                    }
+                    if ctx.items.take_event(true) {
+                        inner.emit(Event::ItemsChanged(id));
                     }
                     inner.lock().running -= 1;
                     inner.set_phase(id, Phase::Finished(end));

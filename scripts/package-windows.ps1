@@ -8,7 +8,13 @@
                                              Install-StartMenuShortcut.ps1 (+ LICENSE/README if
                                              the repo has them)
     Filewinch-<version>-windows-<arch>.msi   per-user installer, when cargo-wix and WiX v3 exist
+    symbols\<version>\<arch>\filewinch.pdb   crash-report symbols; never in the zip or the MSI
   <arch> is x64 or arm64.
+
+  The release profile strips symbols, which on MSVC also means no PDB, so this script builds with
+  CARGO_PROFILE_RELEASE_STRIP=none: the linker then writes filewinch.pdb beside the exe, and the
+  exe itself still holds no debug info (only the PDB's name and id). With -NoBuild, build the
+  same way (the release workflow does) or there is no PDB to keep.
 
   Usage (on Windows, PowerShell 5.1 or later, from anywhere in the repo):
     powershell -ExecutionPolicy Bypass -File scripts\package-windows.ps1
@@ -34,7 +40,8 @@
   The Rust target triple: x86_64-pc-windows-msvc (default) or aarch64-pc-windows-msvc.
 
 .PARAMETER Features
-  Backends to include, space- or comma-separated (default: all of them).
+  Backends to include, space- or comma-separated (default: all of them). Release builds leave
+  out the app's dev-tools feature (headless snapshots, scenes, demo data) either way.
 
 .PARAMETER SkipMsi
   Only build the zip.
@@ -78,6 +85,7 @@ if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
 $Root = (Resolve-Path (Join-Path $PSScriptRoot '..')).ProviderPath
 Push-Location -LiteralPath $Root
 $SavedTargetDir = $env:CARGO_TARGET_DIR
+$SavedStrip = $env:CARGO_PROFILE_RELEASE_STRIP
 try {
     $Metadata = (Invoke-Native cargo @('metadata', '--format-version', '1', '--no-deps')) -join "`n" | ConvertFrom-Json
     $Package = @($Metadata.packages | Where-Object { $_.name -eq 'filewinch-app' })
@@ -102,13 +110,15 @@ try {
     if ($NoBuild) {
         if ($Features) { throw '-Features has no effect with -NoBuild; pass the features to the cargo build instead.' }
         if (-not (Test-Path -LiteralPath $Exe -PathType Leaf)) {
-            throw "-NoBuild: $Exe doesn't exist. Run: cargo build --release --locked -p filewinch-app --target $Target"
+            throw "-NoBuild: $Exe doesn't exist. Run: cargo build --release --locked -p filewinch-app --target $Target --no-default-features --features backends (with CARGO_PROFILE_RELEASE_STRIP=none)"
         }
         Write-Host "== packaging the existing $Exe (-NoBuild)"
     } else {
-        $BuildArgs = @('build', '--release', '--locked', '-p', 'filewinch-app', '--target', $Target)
-        if ($Features) { $BuildArgs += @('--no-default-features', '--features', $Features) }
-        Write-Host "== cargo $($BuildArgs -join ' ')"
+        $BuildFeatures = if ($Features) { $Features } else { 'backends' }
+        $BuildArgs = @('build', '--release', '--locked', '-p', 'filewinch-app', '--target', $Target,
+            '--no-default-features', '--features', $BuildFeatures)
+        $env:CARGO_PROFILE_RELEASE_STRIP = 'none'
+        Write-Host "== CARGO_PROFILE_RELEASE_STRIP=none cargo $($BuildArgs -join ' ')"
         Invoke-Native cargo $BuildArgs | Out-Host
         if (-not (Test-Path -LiteralPath $Exe -PathType Leaf)) { throw "The build finished but $Exe is missing." }
     }
@@ -116,6 +126,16 @@ try {
     $Dist = Join-Path $Root 'dist\windows'
     New-Item -ItemType Directory -Force -Path $Dist | Out-Null
     $Name = "Filewinch-$Version-windows-$Arch"
+
+    # --- symbols: kept beside dist, never packaged -----------------------------------------------
+    $Pdb = Join-Path $TargetDir "$Target\release\filewinch.pdb"
+    if (-not (Test-Path -LiteralPath $Pdb -PathType Leaf)) {
+        throw "$Pdb is missing, so crash reports couldn't be symbolicated. Build with CARGO_PROFILE_RELEASE_STRIP=none (this script does unless -NoBuild)."
+    }
+    $Symbols = Join-Path $Dist "symbols\$Version\$Arch"
+    New-Item -ItemType Directory -Force -Path $Symbols | Out-Null
+    Copy-Item -LiteralPath $Pdb -Destination $Symbols -Force
+    Write-Host "symbols (keep, don't ship): $(Join-Path $Symbols 'filewinch.pdb')"
 
     # --- zip -------------------------------------------------------------------------------------
     $Stage = Join-Path $Dist ".$Name.building"
@@ -175,5 +195,6 @@ try {
     Write-Host "wrote $Msi"
 } finally {
     $env:CARGO_TARGET_DIR = $SavedTargetDir
+    $env:CARGO_PROFILE_RELEASE_STRIP = $SavedStrip
     Pop-Location
 }

@@ -17,7 +17,7 @@ if [[ ${1:-} == --look ]]; then
   out=docs/screens/$look
   mkdir -p "$out"
   # Each scene once; `--appearance` draws it light, then dark, whatever the scene sets.
-  scenes=(empty empty-right local remote connect-sftp connect-s3 connect-swift transfers info sync sync-comparing trust failed password delete-shared delete-shared-everyone settings banner license-sheet license-settings about)
+  scenes=(empty empty-right local remote source-menu-volumes downloading connect-sftp connect-saved connect-saved-many connect-s3 connect-swift transfers info sync sync-comparing trust failed password delete-shared delete-shared-everyone settings banner license-sheet license-settings about)
   [[ $# -gt 0 ]] && scenes=("$@")
   for s in "${scenes[@]}"; do
     for mode in light dark; do
@@ -37,7 +37,7 @@ if [[ ${1:-} == --look ]]; then
   exit 0
 fi
 out=docs/screens
-scenes=(empty empty-right empty-right-dark local local-dark remote connect-sftp connect-s3 connect-swift transfers transfers-dark info sync sync-comparing trust failed password delete-shared delete-shared-everyone banner license-sheet license-sheet-limit)
+scenes=(empty empty-right empty-right-dark local local-dark remote source-menu-volumes downloading connect-sftp connect-saved connect-saved-many connect-s3 connect-swift transfers transfers-dark info sync sync-comparing trust failed password delete-shared delete-shared-everyone banner license-sheet license-sheet-limit)
 [[ $# -gt 0 ]] && scenes=("$@")
 # Settings and About are windows of their own, not scenes: these names render them.
 [[ $# -eq 0 ]] && scenes+=(settings settings-dark license-settings license-settings-registered license-settings-deactivate about about-unregistered about-notices)

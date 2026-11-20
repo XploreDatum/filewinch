@@ -33,6 +33,28 @@ reads the draft and publishes it.
 `scripts/release-mac.sh 0.9.0 --no-notarize --allow-dirty` is a dry run: it builds, signs and
 verifies but doesn't notarize or upload.
 
+## Lean builds and crash-report symbols
+
+Release builds use `--no-default-features --features backends`: every backend, without the
+app's `dev-tools` feature (Rune's headless `--snap`/`--tree`/`--script`, the demo scenes and their
+data, `--look`/`--appearance`). A release binary given one of those flags says it isn't available
+and exits. `cargo run`, the tests and `scripts/screens.sh` keep the dev tools (default features).
+
+The root `Cargo.toml`'s `[profile.release]` builds with fat LTO, one codegen unit and line
+tables, then strips the binary. The symbols are kept, never shipped:
+
+| Platform | Symbols | Where |
+|---|---|---|
+| macOS | `filewinch.dSYM` per architecture (rustc runs `dsymutil` before stripping) | `dist/mac/symbols/<v>/<arch>/` on the Mac that built it; keep it for every published version |
+| Windows | `filewinch.pdb` (the build sets `CARGO_PROFILE_RELEASE_STRIP=none`, so the linker writes it; the exe holds only its id) | the workflow artifact `symbols-windows-x64-<v>` (90 days; never on the release) and `dist/windows/symbols/<v>/` locally |
+| Linux | none kept: the binary is stripped | |
+
+To read a macOS crash report: `atos -o dist/mac/symbols/<v>/arm64/filewinch.dSYM/Contents/Resources/DWARF/filewinch-* -arch arm64 -l <load address> <addresses>`
+(the DWARF file inside keeps rustc's hashed name; each dSYM is about 160 MB).
+The disk image is LZMA (`ULMO`) and holds only `Filewinch.app`, the `Applications` link,
+`.background/background.tiff` and Finder's `.DS_Store`; `release-mac.sh` mounts the finished
+image and fails if anything else is there.
+
 ## One-time setup
 
 ### macOS notarization profile

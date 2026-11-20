@@ -18,3 +18,4 @@ getrandom = "0.3"
 
 [dev-dependencies]
 filewinch-testkit = { path = "../filewinch-testkit" }
+filewinch-engine = { path = "../filewinch-engine" }

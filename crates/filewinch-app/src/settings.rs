@@ -122,6 +122,24 @@ fn stepper(k: &Kit, key: &'static str, value: u32, min: u32, max: u32, set: fn(&
         .child(plus)
 }
 
+/// The warning under "Connections per download" above the safe default.
+pub const CONNECTIONS_WARNING: &str = "More connections can be unstable, and some servers limit or refuse parallel downloads.";
+
+/// "Connections per download": 1–16 (1 is off), with a caution above 3.
+fn connections(k: &Kit, value: u32) -> El {
+    let control = stepper(k, "Connections per download", value, 1, Prefs::MAX_SEGMENTS, |p, v| p.segments_per_file = v);
+    let row = setting(k, "Connections per download", Some("Splits a large download into parts fetched at once. 1 turns it off."), control);
+    if value <= Prefs::SAFE_SEGMENTS {
+        return row;
+    }
+    let warning = text(CONNECTIONS_WARNING).font(k.ty.text_xsmall).color(k.c.warning.fg).wrap().grow(1.0).min_w(0.0).live_region(rune::LiveRegion::Polite);
+    col().key("connections").w_full().child(row).child(row_warning(warning))
+}
+
+fn row_warning(t: El) -> El {
+    row().key("connections-warning").w_full().px(14.0).pb(8.0).mt(-4.0).child(t)
+}
+
 pub fn setting(k: &Kit, label: &str, detail: Option<&str>, control: El) -> El {
     let mut words = col().gap(2.0).grow(1.0).min_w(0.0).child(text(label.to_owned()).font(k.ty.text_small).color(k.c.text_base));
     if let Some(d) = detail {
@@ -191,7 +209,8 @@ pub fn view(s: &SettingsUi, cx: &mut Cx<SettingsUi>) -> El {
     }
     let transfers = group(k, "transfers", "Transfers", vec![
         setting(k, "Simultaneous transfers", Some("Jobs that run at the same time."), stepper(k, "Simultaneous transfers", p.max_jobs, 1, 16, |p, v| p.max_jobs = v)),
-        setting(k, "Files per transfer", Some("Files one job moves in parallel."), stepper(k, "Files per transfer", p.files_per_job, 1, 32, |p, v| p.files_per_job = v)),
+        setting(k, "Files per transfer", Some("Files one job moves in parallel; change it for a running job in Transfers. Each file can use several connections (below), so a job may open files × connections."), stepper(k, "Files per transfer", p.files_per_job, 1, 32, |p, v| p.files_per_job = v)),
+        connections(k, p.segments_per_file),
         setting(k, "Retries", Some("After a dropped connection, with growing waits."), stepper(k, "Retries", p.retries, 0, 20, |p, v| p.retries = v)),
         setting(k, "Bandwidth limit", Some("KB/s across all transfers."), bw),
         setting(k, "When an item already exists", None, conflict),
@@ -276,11 +295,13 @@ pub fn spec() -> AppSpec<SettingsUi> {
         setup: Some(setup),
         poll: Some(poll),
         min_size: Some((520.0, 560.0)),
+        #[cfg(any(test, feature = "dev-tools"))]
         scenes: &[
             ("dark", |s| s.prefs.appearance = Appearance::Dark),
             ("light", |s| s.prefs.appearance = Appearance::Light),
             ("license-unregistered", |s| s.license = filewinch_license::Status::Unregistered),
             ("license-deactivate", |s| s.confirm_deactivate = true),
+            ("connections-warning", |s| s.prefs.segments_per_file = 8),
         ],
         ..AppSpec::new(window_title(crate::theme::ui_os()), (560.0, 760.0), init, view)
     };

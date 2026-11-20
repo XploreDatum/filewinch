@@ -106,10 +106,17 @@ impl ColumnPref {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Prefs {
+    /// Which defaults this file has been brought up to ([`Prefs::VERSION`]); 0 in files from
+    /// before it existed.
+    #[serde(default)]
+    pub version: u32,
     /// Jobs that run at once.
     pub max_jobs: u32,
     /// Files a job moves at once.
     pub files_per_job: u32,
+    /// Connections one large download may use (1 is off). A settings file from before this
+    /// option has none, and loads with the default, 3.
+    pub segments_per_file: u32,
     /// Retries for a dropped connection or rate limit, with backoff.
     pub retries: u32,
     /// Bytes per second across all transfers; `None` is unlimited.
@@ -126,13 +133,21 @@ pub struct Prefs {
     pub editor: Option<String>,
     pub transfers_open: bool,
     pub sidebar_open: bool,
+    /// The Inspector panel at the window's right edge, its width in points
+    /// ([`Prefs::INSPECTOR_WIDTH`]), and the ids of its sections folded shut ("preview", "info",
+    /// "permissions", "checksums", "details").
+    pub inspector_open: bool,
+    pub inspector_width: u32,
+    pub inspector_collapsed: Vec<String>,
 }
 
 impl Default for Prefs {
     fn default() -> Self {
         Prefs {
+            version: Prefs::VERSION,
             max_jobs: 3,
-            files_per_job: 4,
+            files_per_job: 3,
+            segments_per_file: 3,
             retries: 4,
             bandwidth_limit: None,
             conflict: ConflictDefault::Ask,
@@ -144,18 +159,41 @@ impl Default for Prefs {
             editor: None,
             transfers_open: true,
             sidebar_open: true,
+            inspector_open: false,
+            inspector_width: 280,
+            inspector_collapsed: Vec::new(),
         }
     }
 }
 
 impl Prefs {
-    /// The same prefs with every number in a sane range (a hand-edited file can hold anything).
+    /// The most connections one download may use.
+    pub const MAX_SEGMENTS: u32 = 16;
+    /// Above this, Settings warns that servers may limit or refuse parallel downloads.
+    pub const SAFE_SEGMENTS: u32 = 3;
+
+    /// The narrowest and widest the Inspector may be, in points.
+    pub const INSPECTOR_WIDTH: (u32, u32) = (240, 420);
+
+    /// The current settings-file version. 1: "Files per transfer" defaults to 3 (was 4).
+    pub const VERSION: u32 = 1;
+
+    /// The same prefs brought up to [`Prefs::VERSION`], with every number in a sane range (a
+    /// hand-edited file can hold anything). Version 0 saved every value, chosen or not, so a
+    /// "Files per transfer" of 4 (the old default) becomes 3; any other value was chosen and
+    /// stays.
     pub fn clamped(mut self) -> Prefs {
+        if self.version < 1 && self.files_per_job == 4 {
+            self.files_per_job = 3;
+        }
+        self.version = self.version.max(Prefs::VERSION);
         self.max_jobs = self.max_jobs.clamp(1, 16);
         self.files_per_job = self.files_per_job.clamp(1, 32);
+        self.segments_per_file = self.segments_per_file.clamp(1, Prefs::MAX_SEGMENTS);
         self.retries = self.retries.min(20);
         self.bandwidth_limit = self.bandwidth_limit.filter(|b| *b > 0);
         self.columns = ColumnPref::normalized(&self.columns);
+        self.inspector_width = self.inspector_width.clamp(Prefs::INSPECTOR_WIDTH.0, Prefs::INSPECTOR_WIDTH.1);
         self
     }
 }
