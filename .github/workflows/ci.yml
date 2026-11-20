@@ -40,5 +40,25 @@ jobs:
       - name: clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
+      - name: build tests
+        run: cargo test --workspace --locked --no-run
+
+      # Linux: log memory and disk every 30 s, and stop any single process that passes 6 GB,
+      # naming it, so a runaway test fails the step instead of starving the runner (which
+      # loses the whole log).
+      - name: resource guard (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          nohup bash -c 'while true; do
+            echo "$(date -u +%T) $(free -m | awk "/Mem/{print \"mem \" \$3 \"/\" \$2 \" MB\"}") $(df -h / | awk "NR==2{print \"disk free \" \$4}")"
+            ps -eo pid,rss,args --sort=-rss | awk "NR>1 && \$2 > 6000000 {print}" | while read -r pid rss args; do
+              echo "KILLED (rss ${rss} KB): ${args}"; kill -9 "$pid"; done
+            sleep 30; done' > "$RUNNER_TEMP/resources.log" 2>&1 &
+
       - name: test
+        timeout-minutes: 30
         run: cargo test --workspace --locked --no-fail-fast
+
+      - name: resource log (Linux)
+        if: always() && runner.os == 'Linux'
+        run: tail -n 120 "$RUNNER_TEMP/resources.log" || true

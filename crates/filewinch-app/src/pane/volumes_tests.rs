@@ -145,12 +145,12 @@ fn the_menu_lists_volumes_with_kind_and_free_space() {
         let node = a11y_item(&rt, name).unwrap_or_else(|| panic!("{name} in {}", rt.accessibility_json()));
         assert_eq!(node["description"].as_str(), Some(detail), "{node}");
     }
-    assert!(texts(&rt, "label").iter().any(|t| t == "This Mac"));
+    assert!(texts(&rt, "label").iter().any(|t| t == crate::theme::ui_os().this_computer()));
     assert!(rt.elements().iter().any(|e| e.text.as_deref() == Some("Locations")), "the volumes are grouped");
     // The pane is in the home folder: the boot disk carries the tick, not the SSD.
     assert!(ticked(&rt, "Macintosh HD"));
     assert!(!ticked(&rt, "CMG-512M2"));
-    assert!(!ticked(&rt, "This Mac"));
+    assert!(!ticked(&rt, crate::theme::ui_os().this_computer()));
 }
 
 #[test]
@@ -173,7 +173,7 @@ fn choosing_a_volume_goes_there_and_back_still_works() {
     step(&mut rt);
     assert_eq!(rt.state.panes[0].dir, RPath::new(HOME));
     let titles = texts(&rt, "source-title");
-    assert_eq!(titles.iter().filter(|t| *t == "This Mac").count(), 2, "{titles:?}");
+    assert_eq!(titles.iter().filter(|t| *t == crate::theme::ui_os().this_computer()).count(), 2, "{titles:?}");
     assert!(texts(&rt, "source-detail").iter().all(|t| t == "Local disk"));
     // Reopened inside the SSD, the tick follows.
     rt.update(|s, _| s.show_volume(0, &disk(SSD)));
