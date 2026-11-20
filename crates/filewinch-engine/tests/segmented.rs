@@ -351,10 +351,14 @@ fn pause_stops_every_segment_and_resume_continues() {
     h.until(Duration::from_secs(20), |e| matches!(e, Event::Progress(j, p) if *j == id && p.bytes_done > 2 * MB as u64))
         .expect("progress");
     h.engine.pause(id);
-    std::thread::sleep(Duration::from_millis(100));
+    // Each segment stops at its next chunk boundary: from the pause on, at most the one 64 KiB
+    // read each of the 3 had already begun lands, however slowly they drain. A fixed window
+    // then shows nothing more moves (a broken pause would keep going).
     let before = src.served.load(Ordering::SeqCst);
-    std::thread::sleep(Duration::from_millis(300));
-    assert_eq!(src.served.load(Ordering::SeqCst), before, "nothing moves while paused");
+    h.until(Duration::from_secs(30), |e| matches!(e, Event::State(j, JobState::Paused) if *j == id)).expect("paused");
+    std::thread::sleep(Duration::from_millis(400));
+    let moved = src.served.load(Ordering::SeqCst) - before;
+    assert!(moved <= 3 * 64 * 1024, "nothing moves while paused beyond the in-flight chunks: {moved}");
     h.engine.resume(id);
     assert_done(&h.wait(id));
     assert!(dst.get("/dl/big.bin").unwrap() == data);

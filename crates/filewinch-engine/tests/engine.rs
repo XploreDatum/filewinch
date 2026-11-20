@@ -463,12 +463,13 @@ fn pause_stops_bytes_and_resume_finishes() {
     let id = h.engine.enqueue(copy(&ra, &["/big"], &rb, "/", ConflictPolicy::Ask));
     h.until(Duration::from_secs(10), |e| matches!(e, Event::Progress(_, p) if p.bytes_done > 10_000)).unwrap();
     h.engine.pause(id);
-    h.until(Duration::from_secs(5), |e| matches!(e, Event::State(_, JobState::Paused))).expect("Paused state");
-    std::thread::sleep(Duration::from_millis(100));
+    // The one stream stops at its next chunk: from the pause on, at most the 4 KiB read it had
+    // already begun lands, however slowly; then a fixed window shows nothing more moves.
     let before = b.get("/big").unwrap().len();
-    std::thread::sleep(Duration::from_millis(300));
+    h.until(Duration::from_secs(30), |e| matches!(e, Event::State(_, JobState::Paused))).expect("Paused state");
+    std::thread::sleep(Duration::from_millis(400));
     let after = b.get("/big").unwrap().len();
-    assert_eq!(before, after, "no bytes while paused");
+    assert!(after - before <= 4096, "no bytes while paused beyond the in-flight chunk: {before} -> {after}");
     *a.read_delay.lock().unwrap() = Duration::ZERO;
     h.engine.resume(id);
     assert_done(&h.wait(id));

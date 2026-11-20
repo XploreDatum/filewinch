@@ -2,6 +2,7 @@
 //! through Rune's headless runtime (keys, clicks, the accessibility tree).
 
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use filewinch_core::{Error, ErrorKind, Protocol, RPath, Remote};
 use rune::{Env, Key, KeyEvent, Mods, Runtime};
@@ -498,15 +499,44 @@ fn progress_text_while_counting_and_with_totals() {
 
 #[test]
 fn inline_rows_show_moving_files_with_skip_labels_and_not_for_single_files() {
-    let mut rt = runtime(scene_ui("transfers-folder"));
+    let mut ui = scene_ui("transfers-folder");
+    // The scene's retry is 4.4 s out on the real clock, which a slow runner ticks down before
+    // the first frame. Pin it an hour out so the label's form, not the clock, is under test.
+    set_retry_at(&mut ui, Instant::now() + Duration::from_secs(3600));
+    let mut rt = runtime(ui);
     rt.frame(0.1);
     let tree = rt.accessibility_json().to_string();
     assert!(tree.contains("Skip Friends.S01E05.The.One.With.The.East.German.Laundry.Detergent.1080p.BluRay.x264.mkv, 45% downloaded"), "pie label");
     assert!(tree.contains("connecting…"), "a file still connecting says so");
-    assert!(tree.contains("retrying in 5 seconds") || tree.contains("retrying in 4 seconds"), "a retrying file says when");
+    let left = tree.split_once("retrying in ").and_then(|(_, t)| t.split_once(" seconds")).and_then(|(n, _)| n.parse::<u64>().ok());
+    assert!(left.is_some_and(|n| (1..=3600).contains(&n)), "a retrying file says when: {left:?}");
+    let inline = rt.elements().into_iter().filter_map(|e| e.text).any(|t| t.starts_with("Retrying in ") && t.ends_with(" s…"));
+    assert!(inline, "the inline row says when too");
     assert!(tree.contains("Downloading now (4)") && tree.contains("Queued (3)") && tree.contains("Skipped (1)"), "grouped list");
     assert!(tree.contains("Done (4)"), "done is listed (collapsed)");
     assert!(!tree.contains("site-2026-11.tar, "), "no inline row for the single file");
+}
+
+/// Moves every retrying item of the scene's running job to retry at `at`.
+fn set_retry_at(ui: &mut Ui, at: Instant) {
+    use crate::transfers::engine::ActivePhase;
+    let items = &mut ui.transfers.rows[0].items;
+    for v in items.active.iter_mut().chain(items.pages.values_mut().flatten()) {
+        if let Some(ActivePhase::Retrying { at: a }) = &mut v.phase {
+            *a = at;
+        }
+    }
+}
+
+#[test]
+fn a_retry_whose_moment_has_passed_says_now_not_zero() {
+    let mut ui = scene_ui("transfers-folder");
+    set_retry_at(&mut ui, Instant::now().checked_sub(Duration::from_secs(1)).unwrap_or_else(Instant::now));
+    let mut rt = runtime(ui);
+    rt.frame(0.1);
+    let tree = rt.accessibility_json().to_string();
+    assert!(tree.contains("retrying now") && !tree.contains("retrying in 0"), "{tree}");
+    assert!(rt.elements().into_iter().filter_map(|e| e.text).any(|t| t == "Retrying now…"), "the inline row too");
 }
 
 #[test]

@@ -193,11 +193,14 @@ fn pause_cancel_and_skipping_a_folder() {
     }
     assert!(h.engine.skip_item(id, &RPath::new("/t/other")));
     h.engine.pause(id);
-    h.until(Duration::from_secs(5), |e| matches!(e, Event::State(j, JobState::Paused) if *j == id)).expect("paused");
-    std::thread::sleep(Duration::from_millis(150));
+    // One file at a time: from the pause on, at most the one already started finishes (plus
+    // one that had let its slot go but not yet counted itself done), however slowly; then a
+    // fixed window shows nothing more changes.
     let before = h.engine.item_counts(id);
-    std::thread::sleep(Duration::from_millis(300));
-    assert_eq!(h.engine.item_counts(id).done, before.done, "nothing changes while paused");
+    h.until(Duration::from_secs(30), |e| matches!(e, Event::State(j, JobState::Paused) if *j == id)).expect("paused");
+    std::thread::sleep(Duration::from_millis(400));
+    let after = h.engine.item_counts(id).done;
+    assert!(after <= before.done + 2, "nothing changes while paused beyond the file in flight: {} -> {after}", before.done);
     h.engine.resume(id);
     assert_done(&h.wait(id));
     assert_eq!(mode(&root.join("t/other/d.txt")), 0o644, "inside the skipped folder: unchanged");

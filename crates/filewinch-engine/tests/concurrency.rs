@@ -24,6 +24,15 @@ fn copy_job(src: &Arc<Mem>, dst: &Arc<Mem>, path: &str) -> Job {
     }
 }
 
+/// Polls until `f` holds (or panics after 30 s, far beyond any slow runner).
+fn eventually(what: &str, mut f: impl FnMut() -> bool) {
+    let end = Instant::now() + Duration::from_secs(30);
+    while !f() {
+        assert!(Instant::now() < end, "timed out waiting for {what}");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
 /// Samples the source's open readers every 2 ms into `peak` until `stop`.
 fn sampler(src: Arc<Mem>, peak: Arc<AtomicUsize>, stop: Arc<AtomicBool>) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
@@ -49,25 +58,31 @@ fn files_at_once_changes_live_without_cancelling() {
 
     let (peak, stop) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicBool::new(false)));
     let s = sampler(src.clone(), peak.clone(), stop.clone());
-    std::thread::sleep(Duration::from_millis(400));
+    let done = |h: &Harness| h.engine.item_counts(id).done;
+    eventually("two files done at 2 at once", || done(&h) >= 2);
     assert!(peak.load(Ordering::SeqCst) <= 2, "never above the limit: {}", peak.load(Ordering::SeqCst));
 
     // Up: more files start right away.
     h.engine.set_job_files(id, 6);
     assert_eq!(h.engine.job_files(id), Some(6));
     peak.store(0, Ordering::SeqCst);
-    std::thread::sleep(Duration::from_millis(250));
+    eventually("more than 2 at once after raising to 6", || src.open_readers.load(Ordering::SeqCst) > 2);
     let up = peak.load(Ordering::SeqCst);
-    assert!(up > 2 && up <= 6, "raised to 6: {up} at once");
+    assert!(up <= 6, "raised to 6: {up} at once");
 
-    // Down: in-flight files finish, no new one starts above the limit.
+    // Down: in-flight files finish, no new one starts above the limit. At most 6 files hold a
+    // slot now, and a new one can only start once every one of them has let go, so once 6 more
+    // files are done the old ones have all drained (no wall-clock guess).
     h.engine.set_job_files(id, 1);
-    std::thread::sleep(Duration::from_millis(300)); // the in-flight ones (≤ 135 ms) are done
+    let lowered_at = done(&h);
+    eventually("the in-flight files drain", || done(&h) >= lowered_at + 6 && src.open_readers.load(Ordering::SeqCst) <= 1);
+    assert!(done(&h) < 24, "files left to check the lowered limit on: {} done", done(&h));
     peak.store(0, Ordering::SeqCst);
-    std::thread::sleep(Duration::from_millis(300));
+    // From here to the end of the job, never more than one at once.
+    let end = h.wait(id);
     assert!(peak.load(Ordering::SeqCst) <= 1, "lowered to 1: {}", peak.load(Ordering::SeqCst));
 
-    assert_done(&h.wait(id));
+    assert_done(&end);
     stop.store(true, Ordering::SeqCst);
     s.join().unwrap();
     assert!(h.failures(id).is_empty(), "nothing was cancelled or failed");

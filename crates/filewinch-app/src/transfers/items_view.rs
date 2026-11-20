@@ -111,7 +111,8 @@ fn folder_of(rel: &str) -> &str {
     rel.rsplit_once('/').map_or("", |(d, _)| d)
 }
 
-/// "Retrying in 4 seconds" / "4 s".
+/// "Retrying in 4 seconds" / "4 s". 0 once the moment has passed but the engine hasn't
+/// started the next try yet (said as "Retrying now", never "in 0 seconds").
 fn retry_left(at: Instant) -> u64 {
     at.saturating_duration_since(Instant::now()).as_secs_f64().ceil() as u64
 }
@@ -122,6 +123,7 @@ pub fn item_status(v: &ItemView) -> String {
     match (v.state, v.phase) {
         (ItemState::Active, Some(ActivePhase::Connecting)) => "Connecting…".into(),
         (ItemState::Active, Some(ActivePhase::Retrying { at })) => match retry_left(at) {
+            0 => "Retrying now".into(),
             1 => "Retrying in 1 second".into(),
             n => format!("Retrying in {n} seconds"),
         },
@@ -197,7 +199,10 @@ fn active_row(id: JobId, v: &ItemView, k: &Kit, paint: &Paint) -> El {
         .child(icon(file_icon(v), 14.0).color(k.c.icon_muted).a11y_hidden())
         .child(text(middle(name, 44)).font(k.ty.text_xsmall).color(k.c.text_base).truncate().shrink().min_w(0.0).a11y_hidden());
     let extra = match v.phase {
-        Some(ActivePhase::Retrying { at }) => format!("Retrying in {} s…", retry_left(at)),
+        Some(ActivePhase::Retrying { at }) => match retry_left(at) {
+            0 => "Retrying now…".to_owned(),
+            n => format!("Retrying in {n} s…"),
+        },
         Some(ActivePhase::Connecting) => "Connecting…".to_owned(),
         _ => match v.size {
             Some(s) if v.bytes_per_sec >= 1.0 => format!("{} of {} · {}", fmt::size(v.bytes_done), fmt::size(s), fmt::speed(v.bytes_per_sec)),
