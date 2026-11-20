@@ -82,7 +82,7 @@ fn the_right_pane_starts_empty_with_connect_and_this_mac() {
     assert!(name.contains("Connect"), "{name}");
     let (role, name) = named("empty-local-1").expect("this mac");
     assert_eq!(role, "button");
-    assert!(name.contains("This Mac"), "{name}");
+    assert!(name.contains(crate::theme::ui_os().this_computer()), "{name}");
     assert!(els.iter().any(|e| e.key.as_deref() == Some("pane-1") && e.focusable), "Cmd-2 and Tab reach the empty pane");
 }
 
