@@ -95,10 +95,11 @@ impl FaultProxy {
 }
 
 fn cut(s: &mut State, cuts: &AtomicU64) {
+    // Counted before the shutdown: a client woken by the cut must already see it in `cuts()`.
+    cuts.fetch_add(1, Ordering::SeqCst);
     for c in s.conns.drain(..) {
         let _ = c.shutdown(Shutdown::Both);
     }
-    cuts.fetch_add(1, Ordering::SeqCst);
 }
 
 impl Drop for FaultProxy {

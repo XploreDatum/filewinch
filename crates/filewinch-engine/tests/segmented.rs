@@ -24,8 +24,10 @@ struct Gate {
     /// Ranged reads allowed before the server starts ignoring ranges.
     honour_ranges: AtomicUsize,
     ignore: AtomicBool,
-    /// Absolute positions where one ranged reader fails (each used once).
-    faults: Mutex<Vec<u64>>,
+    /// Absolute positions where a ranged reader fails, each used once by whichever reader
+    /// actually reaches it (not the one whose range covered it when opened: that piece may be
+    /// split, and its reader stop short, before getting there).
+    faults: Arc<Mutex<Vec<u64>>>,
     /// (offset, len) of every ranged read, in order.
     ranges: Mutex<Vec<(u64, u64)>>,
     /// Offsets of plain reads.
@@ -41,7 +43,7 @@ impl Gate {
             max_open: Arc::default(),
             honour_ranges: AtomicUsize::new(usize::MAX),
             ignore: AtomicBool::new(false),
-            faults: Mutex::default(),
+            faults: Arc::default(),
             ranges: Mutex::default(),
             reads: Mutex::default(),
         })
@@ -60,12 +62,20 @@ struct GateReader {
     inner: Box<dyn Read + Send>,
     open: Arc<AtomicUsize>,
     pos: u64,
+    faults: Arc<Mutex<Vec<u64>>>,
     fail_at: Option<u64>,
 }
 
 impl Read for GateReader {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let mut limit = buf.len();
+        if self.fail_at.is_none() {
+            // The engine never asks past a piece's current end, so a fault inside this read is
+            // one this reader really reaches.
+            let mut f = self.faults.lock().unwrap();
+            let end = self.pos + limit as u64;
+            self.fail_at = f.iter().position(|x| (self.pos..end).contains(x)).map(|i| f.remove(i));
+        }
         if let Some(f) = self.fail_at {
             if self.pos >= f {
                 return Err(io::Error::other(Error::new(ErrorKind::Network, "The connection dropped (injected).")));
@@ -115,10 +125,6 @@ impl Remote for Gate {
             return Err(Error::too_many_connections("421 Too many connections (test)"));
         }
         self.max_open.fetch_max(now, Ordering::SeqCst);
-        let fail_at = {
-            let mut f = self.faults.lock().unwrap();
-            f.iter().position(|x| *x > offset && *x < offset + len).map(|i| f.remove(i))
-        };
         let inner = match self.inner.read_range(path, offset, len) {
             Ok(r) => r,
             Err(e) => {
@@ -126,7 +132,7 @@ impl Remote for Gate {
                 return Err(e);
             }
         };
-        Ok(Box::new(GateReader { inner, open: self.open.clone(), pos: offset, fail_at }))
+        Ok(Box::new(GateReader { inner, open: self.open.clone(), pos: offset, faults: self.faults.clone(), fail_at: None }))
     }
     fn write(&self, path: &RPath, offset: u64, size: Option<u64>) -> Result<Box<dyn WriteSink>> {
         self.inner.write(path, offset, size)
@@ -333,7 +339,7 @@ fn cancel_deletes_the_temp_file() {
 }
 
 fn wait_closed(gate: &Gate) {
-    let end = Instant::now() + Duration::from_secs(10);
+    let end = Instant::now() + Duration::from_secs(30);
     while gate.open.load(Ordering::SeqCst) > 0 {
         assert!(Instant::now() < end, "segment readers still open");
         std::thread::sleep(Duration::from_millis(10));
@@ -378,7 +384,7 @@ fn a_restarted_engine_resumes_from_the_sidecar() {
             .expect("progress");
     } // the app quits: the engine drops and keeps partial downloads
     // The job thread holds the source until it has saved the sidecar and ended.
-    let end = Instant::now() + Duration::from_secs(10);
+    let end = Instant::now() + Duration::from_secs(30);
     while Arc::strong_count(&gate) > 1 {
         assert!(Instant::now() < end, "the job thread didn't end");
         std::thread::sleep(Duration::from_millis(10));
@@ -492,7 +498,7 @@ fn forgetting_a_failed_job_deletes_its_partial_download() {
     assert!(matches!(h.wait(id), JobState::Failed(_)));
     assert!(dst.exists("/dl/.big.bin.filewinch-part"), "kept for a retry");
     assert!(h.engine.forget(id));
-    let end = Instant::now() + Duration::from_secs(5);
+    let end = Instant::now() + Duration::from_secs(30);
     while dst.exists("/dl/.big.bin.filewinch-part") {
         assert!(Instant::now() < end, "temp file not removed");
         std::thread::sleep(Duration::from_millis(10));

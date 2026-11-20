@@ -96,7 +96,7 @@ fn wrong_password_is_auth_for_every_version() {
 
 #[test]
 fn unreachable_auth_server_is_network() {
-    let port = filewinch_testkit::free_port();
+    let port = filewinch_testkit::refused_port();
     let m = Mock::start();
     let mut site = m.site("/v3", "test:tester");
     site.host = format!("http://127.0.0.1:{port}/v3");

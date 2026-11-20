@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use filewinch_core::{ErrorKind, Remote};
 use filewinch_local::LocalRemote;
-use filewinch_testkit::{Kind, free_port};
+use filewinch_testkit::Kind;
 
 use super::flow::{job, round_trip};
 use super::harness::{Harness, Stop};
@@ -31,7 +31,8 @@ fn unhappy(kind: Kind) {
     assert!(!err.message.contains("not-the-password") && !format!("{:?}", err.detail).contains("not-the-password"), "{name}: the error repeats the password");
 
     let mut nobody = live.site.clone();
-    nobody.port = Some(free_port());
+    let port = filewinch_testkit::refused_port();
+    nobody.port = Some(port);
     let err = connect(&nobody, &live.srv.pass).err().unwrap_or_else(|| panic!("{name}: connected to a closed port"));
     assert_eq!(err.kind, ErrorKind::Network, "{name}: closed port: {err:?}");
 

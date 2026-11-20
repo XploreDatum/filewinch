@@ -149,6 +149,8 @@ fn run(
 ) {
     let seen = Arc::new(Mutex::new(Seen::default()));
     let mock = auth_server(seen.clone(), refresh);
+    // A browser that does nothing never gets a page back; the others always do.
+    let page_expected = !matches!(mode, Browser::Nothing);
     let opts = SignInOptions {
         timeout,
         endpoints: Some(mock.endpoints()),
@@ -156,8 +158,8 @@ fn run(
         fixed_ports: vec![free_port(), free_port()],
     };
     let r = sign_in_with(p, &client(p), cancel, opts);
-    // Give the fake browser a moment to record the page it got back.
-    let until = Instant::now() + Duration::from_secs(2);
+    // Wait for the fake browser to record the page it got back.
+    let until = Instant::now() + if page_expected { Duration::from_secs(30) } else { Duration::ZERO };
     while seen.lock().unwrap().page.is_none()
         && Instant::now() < until
         && !matches!(r, Err(ref e) if e.kind == ErrorKind::Cancelled)
@@ -367,7 +369,9 @@ fn times_out() {
     let e = r.unwrap_err();
     assert_eq!(e.kind, ErrorKind::Auth);
     assert!(e.message.contains("timed out"), "{e}");
-    assert!(started.elapsed() < Duration::from_secs(5));
+    // Nothing else ends it (the browser does nothing); the bound only catches a timeout read in
+    // the wrong unit, with room for a loaded runner.
+    assert!(started.elapsed() < Duration::from_secs(15), "{:?}", started.elapsed());
 }
 
 #[test]
@@ -386,8 +390,9 @@ fn cancel_stops_waiting() {
         Some("rt"),
         cancel,
     );
+    // Cancelled (not the 20 s timeout's Auth error), and well before that timeout.
     assert_eq!(r.unwrap_err().kind, ErrorKind::Cancelled);
-    assert!(started.elapsed() < Duration::from_secs(3));
+    assert!(started.elapsed() < LONG / 2, "{:?}", started.elapsed());
 }
 
 #[test]

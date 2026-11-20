@@ -210,8 +210,10 @@ fn cut_connection_mid_download_is_network_error() {
     std::fs::write(bucket.join("f.bin"), &data).unwrap();
     let proxy = FaultProxy::start(srv.addr);
     let r = connect_with(proxy.port, &srv.user, &srv.pass).unwrap();
-    let mut reader = r.read(&RPath::new("/b/f.bin"), 0).unwrap();
+    // Armed before the request: the proxy forwards nothing past the budget (the request is a
+    // few hundred bytes of it), so the body can't all slip into socket buffers before the cut.
     proxy.cut_after(1024 * 1024);
+    let mut reader = r.read(&RPath::new("/b/f.bin"), 0).unwrap();
     let mut out = Vec::new();
     let err = reader.read_to_end(&mut out).expect_err("the cut must surface");
     let err = filewinch_http_from_io(err);

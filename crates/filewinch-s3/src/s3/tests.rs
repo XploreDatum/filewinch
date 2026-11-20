@@ -454,13 +454,14 @@ fn missing_secret_is_auth() {
 }
 
 fn wait_for(cond: impl Fn() -> bool) {
-    for _ in 0..100 {
+    let end = std::time::Instant::now() + Duration::from_secs(30);
+    while std::time::Instant::now() < end {
         if cond() {
             return;
         }
-        std::thread::sleep(Duration::from_millis(50));
+        std::thread::sleep(Duration::from_millis(20));
     }
-    panic!("condition not met in 5 s");
+    panic!("condition not met in 30 s");
 }
 
 const MD5_HELLO: &str = "5d41402abc4b2a76b9719d911017c592";

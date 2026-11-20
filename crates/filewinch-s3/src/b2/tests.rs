@@ -181,11 +181,9 @@ fn dropped_large_upload_is_cancelled() {
     let mut sink = r.write(&RPath::new("/docs/big.bin"), 0, Some(20_000_000)).unwrap();
     sink.write_all(&vec![1u8; 6_000_000]).unwrap();
     drop(sink);
-    for _ in 0..100 {
-        if !st.lock().unwrap().cancelled.is_empty() {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(50));
+    let end = std::time::Instant::now() + Duration::from_secs(30);
+    while std::time::Instant::now() < end && st.lock().unwrap().cancelled.is_empty() {
+        std::thread::sleep(Duration::from_millis(20));
     }
     let s = st.lock().unwrap();
     assert_eq!(s.cancelled.len(), 1);

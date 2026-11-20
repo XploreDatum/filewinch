@@ -23,7 +23,7 @@ impl Read for Trickle {
         std::thread::sleep(Duration::from_millis(1));
         let n = buf.len().min(64 * 1024);
         buf[..n].fill(0);
-        self.0.fetch_add(n as u64, Ordering::Relaxed);
+        self.0.fetch_add(n as u64, Ordering::SeqCst);
         Ok(n)
     }
 }
@@ -87,15 +87,16 @@ fn cancel_mid_hash_returns_cancelled_quickly() {
     let trigger = cancel.clone();
     let reported = Arc::new(AtomicU64::new(0));
     let seen = reported.clone();
+    let served = a.served.clone();
     // Cancel once hashing is under way and has been reported.
     let canceller = std::thread::spawn(move || {
         let deadline = Instant::now() + Duration::from_secs(20);
         while seen.load(Ordering::Relaxed) == 0 && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(2));
         }
-        let at = Instant::now();
         trigger.cancel();
-        at
+        // Read after the cancel: only a read already under way can still add to it.
+        served.load(Ordering::SeqCst)
     });
     let mut last = CompareProgress::default();
     let err = compare_with(&a, &RPath::root(), &b, &RPath::root(), &checksum(), &cancel, &mut |p| {
@@ -103,10 +104,11 @@ fn cancel_mid_hash_returns_cancelled_quickly() {
         last = p.clone();
     })
     .unwrap_err();
-    let returned = Instant::now();
-    let cancelled_at = canceller.join().unwrap();
+    let served_at_cancel = canceller.join().unwrap();
     assert_eq!(err.kind, ErrorKind::Cancelled);
-    assert!(returned - cancelled_at < Duration::from_millis(500), "took {:?}", returned - cancelled_at);
+    // Quickly, in bytes rather than time: it stopped after the one 64 KiB read in progress.
+    let more = a.served.load(Ordering::SeqCst) - served_at_cancel;
+    assert!(more <= 64 * 1024, "read {more} more bytes after the cancel");
     assert!(last.bytes_hashed > 0, "progress reported the hashing: {last:?}");
     assert_eq!(last.current.as_deref(), Some("big.bin"));
     // It stopped reading: the served count no longer grows.

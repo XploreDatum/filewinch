@@ -293,16 +293,20 @@ fn with_workers(
 
 fn worker(ctx: &JobCtx, tally: &Tally, rx: &Mutex<Receiver<Item>>, work: &(impl Fn(&Item) -> Result<Outcome> + Sync)) {
     loop {
+        // A file slot first, then the next item: only a worker holding a slot takes one, so
+        // files start in the order they were queued (racing for slots after taking items let
+        // a later file jump ahead). A lowered limit holds new files back; in-flight ones finish.
+        let slot = ctx.ctl.acquire_file().is_ok();
         let item = match rx.lock().unwrap_or_else(|e| e.into_inner()).recv() {
             Ok(i) => i,
-            Err(_) => return,
+            Err(_) => {
+                if slot {
+                    ctx.ctl.release_file();
+                }
+                return;
+            }
         };
-        if item.live.skip.load(Ordering::SeqCst) {
-            skipped_by_person(ctx, tally, &item);
-            continue;
-        }
-        // Then a file slot, so a lowered limit holds new files back (in-flight ones finish).
-        if ctx.ctl.acquire_file().is_err() {
+        if !slot {
             continue; // cancelled: drain without doing anything
         }
         if item.live.skip.load(Ordering::SeqCst) {

@@ -47,9 +47,9 @@ fn drain(ui: &mut Ui) {
     }
 }
 
-/// Polls (landing finished work) until `done`, for up to 10 s.
+/// Polls (landing finished work) until `done`, for up to 30 s.
 fn until(ui: &mut Ui, mut done: impl FnMut(&Ui) -> bool) -> bool {
-    let end = std::time::Instant::now() + Duration::from_secs(10);
+    let end = std::time::Instant::now() + Duration::from_secs(30);
     while std::time::Instant::now() < end {
         ui.inspector_follow();
         ui.inspector_land();

@@ -232,10 +232,16 @@ fn boot_first_then_kind_then_name() {
 #[test]
 fn a_slow_call_gives_up_in_time() {
     use std::time::{Duration, Instant};
+    // The call only ends when the test lets it (or after a minute): giving up can't be
+    // confused with the call finishing, however slow the runner.
+    let (release, wait) = std::sync::mpsc::channel::<()>();
     let start = Instant::now();
-    let got = super::bounded(Duration::from_millis(50), || std::thread::sleep(Duration::from_secs(2)));
+    let got = super::bounded(Duration::from_millis(50), move || {
+        let _ = wait.recv_timeout(Duration::from_secs(60));
+    });
     assert!(got.is_none());
-    assert!(start.elapsed() < Duration::from_secs(1));
+    assert!(start.elapsed() < Duration::from_secs(30), "waited for the call: {:?}", start.elapsed());
+    drop(release);
     assert_eq!(super::bounded(Duration::from_secs(5), || 7), Some(7));
 }
 

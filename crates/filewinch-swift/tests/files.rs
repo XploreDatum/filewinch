@@ -196,8 +196,10 @@ fn cut_mid_download_is_network() {
     let mut site = m.site("/v3", "test:tester");
     site.host = format!("http://127.0.0.1:{}/v3", proxy.port);
     let r = connect(&site, PASS, Tuning::default()).unwrap();
-    let mut reader = r.read(&RPath::new("/c/big"), 0).unwrap();
+    // Armed before the request: the proxy forwards nothing past the budget (the request is a
+    // few hundred bytes of it), so the body can't all slip into socket buffers before the cut.
     proxy.cut_after(256 * 1024);
+    let mut reader = r.read(&RPath::new("/c/big"), 0).unwrap();
     let mut buf = Vec::new();
     let e = reader.read_to_end(&mut buf).unwrap_err();
     assert!(buf.len() < data.len());

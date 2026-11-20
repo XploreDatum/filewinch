@@ -251,10 +251,12 @@ fn server_errors_and_timeouts_never_unregister() {
     m.on("validate", Reply::Json(200, "not json"));
     assert!(matches!(l.check(T0 + 5 * DAY), Check::Skipped(_)));
     // A server that never answers: the call gives up on its deadline.
-    m.on("validate", Reply::Hang(Duration::from_secs(5)));
+    // (The server hangs for a minute, the deadline is 0.8 s: ending well before the minute
+    // can only be the deadline, with a wide margin for a slow runner.)
+    m.on("validate", Reply::Hang(Duration::from_secs(60)));
     let started = Instant::now();
     assert!(matches!(l.check(T0 + 6 * DAY), Check::Skipped(_)));
-    assert!(started.elapsed() < Duration::from_secs(4), "{:?}", started.elapsed());
+    assert!(started.elapsed() < Duration::from_secs(30), "{:?}", started.elapsed());
     let Status::Registered(r) = l.status() else { panic!("still registered") };
     assert_eq!(r.holder(), Some("Alex Morgan"));
     assert_eq!(r.last_validated, T0, "only a real confirmation counts");

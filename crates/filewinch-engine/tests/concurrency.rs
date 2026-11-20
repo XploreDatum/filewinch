@@ -175,3 +175,26 @@ fn transfers_start_while_folders_are_still_being_counted() {
     let _ = t;
     assert_eq!(dst.tree("/dst/tree").iter().filter(|(_, d)| d.is_some()).count(), 50);
 }
+
+#[test]
+fn one_file_at_a_time_starts_them_in_queue_order() {
+    // Workers take a file slot before the next item, so with one slot no later file can win
+    // the race for it and start ahead of an earlier one.
+    for round in 0..20 {
+        let src = Mem::new(full_caps());
+        for i in 0..12 {
+            src.put(&format!("/o/f{i:02}"), &bytes(256, i as u8));
+        }
+        let dst = Mem::new(full_caps());
+        dst.mkdirs("/dst");
+        let mut h = Harness::new(EngineConfig { max_files_per_job: 1, ..cfg() });
+        let id = h.engine.enqueue(copy_job(&src, &dst, "/o"));
+        assert_done(&h.wait(id));
+        let started: Vec<String> = h.log.iter().filter_map(|e| match e {
+            Event::ItemStarted { job, path, .. } if *job == id => Some(path.name().to_string()),
+            _ => None,
+        }).collect();
+        let want: Vec<String> = (0..12).map(|i| format!("f{i:02}")).collect();
+        assert_eq!(started, want, "round {round}");
+    }
+}

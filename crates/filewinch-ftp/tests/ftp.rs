@@ -89,7 +89,7 @@ fn login_and_wrong_password() {
 
 #[test]
 fn unreachable_server_is_a_network_error() {
-    let port = filewinch_testkit::free_port();
+    let port = filewinch_testkit::refused_port();
     let err = connect(&site(port, "u", Protocol::Ftp), "p").err().unwrap();
     assert_eq!(err.kind, ErrorKind::Network);
     assert!(err.message.contains("refused the connection"), "{}", err.message);

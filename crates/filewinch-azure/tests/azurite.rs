@@ -219,8 +219,10 @@ fn cut_mid_download_is_network() {
 
     let proxy = FaultProxy::start(([127, 0, 0, 1], az.port).into());
     let via = connect(&common::site(proxy.port, common::DEV_ACCOUNT), DEV_KEY).unwrap();
-    let mut reader = via.read(&p("/cut/f.bin"), 0).unwrap();
+    // Armed before the request: the proxy forwards nothing past the budget (the request is a
+    // few hundred bytes of it), so the body can't all slip into socket buffers before the cut.
     proxy.cut_after(1_000_000);
+    let mut reader = via.read(&p("/cut/f.bin"), 0).unwrap();
     let mut out = Vec::new();
     let err = reader.read_to_end(&mut out).unwrap_err();
     let core = filewinch_http::from_io(err);

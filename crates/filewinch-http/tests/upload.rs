@@ -135,9 +135,12 @@ fn drop_aborts(len: Option<u64>) {
     pipe.write_all(&data).unwrap();
     let started = Instant::now();
     drop(pipe);
+    // Drop detaches the worker instead of joining it; this only guards against a regression
+    // that waits for the upload, with room for a loaded runner.
     assert!(
-        started.elapsed() < Duration::from_millis(200),
-        "Drop must not block"
+        started.elapsed() < Duration::from_secs(5),
+        "Drop must not block: {:?}",
+        started.elapsed()
     );
     let seen = seen
         .recv_timeout(Duration::from_secs(10))

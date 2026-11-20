@@ -230,12 +230,17 @@ fn a_watched_folder_relists_when_another_app_adds_a_file() {
     }
     assert!(rt.state.watches.is_armed(0), "the shown folder is watched");
     assert!(!rt.state.watches.is_armed(1), "an empty pane watches nothing");
-    // FSEvents can take a moment to start delivering.
-    std::thread::sleep(std::time::Duration::from_millis(300));
-    std::fs::write(dir.join("from-another-app.txt"), b"hi").unwrap();
+    // The watcher can take a moment to start delivering, and a write before that is never
+    // reported: write again every half second until the pane lists the file (rather than
+    // guessing how long the start takes).
     let start = std::time::Instant::now();
     let mut t = 1.0;
-    while rt.state.panes[0].entry("from-another-app.txt").is_none() && start.elapsed() < std::time::Duration::from_secs(10) {
+    let mut wrote = 0;
+    while rt.state.panes[0].entry("from-another-app.txt").is_none() && start.elapsed() < std::time::Duration::from_secs(30) {
+        if start.elapsed() >= std::time::Duration::from_millis(500) * wrote {
+            std::fs::write(dir.join("from-another-app.txt"), format!("hi {wrote}")).unwrap();
+            wrote += 1;
+        }
         std::thread::sleep(std::time::Duration::from_millis(50));
         t += 0.1;
         at(&mut rt, t);

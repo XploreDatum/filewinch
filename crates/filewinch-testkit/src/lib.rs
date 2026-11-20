@@ -120,6 +120,14 @@ pub fn scratch_dir(base: &Path, prefix: &str) -> PathBuf {
     dir
 }
 
+/// A local port that refuses connections: 1 (tcpmux), which no test binds (they all take
+/// OS-assigned ephemeral ports) and an unprivileged process can't listen on (Linux). Use it for
+/// "nothing there" tests: [`free_port`]'s port may be taken by a parallel test before it's
+/// used, and a bound-but-not-listening socket isn't refused on macOS (the SYN is dropped).
+pub fn refused_port() -> u16 {
+    1
+}
+
 /// A port nobody is listening on right now.
 pub fn free_port() -> u16 {
     TcpListener::bind("127.0.0.1:0").expect("bind 127.0.0.1:0").local_addr().expect("local addr").port()
@@ -243,6 +251,10 @@ impl Server {
             args.extend(opts.extra_args.iter().cloned());
             args.extend(["--log-file".into(), scratch.join("server.log").display().to_string(), "-v".into()]);
 
+            // A fresh log per attempt: `wait_ready` rejects a log that says "address already in
+            // use", so a failed attempt's line must not condemn the next one (that made every
+            // retry after a lost port race wait out its deadline, then fail the test).
+            let _ = std::fs::remove_file(scratch.join("server.log"));
             let mut child = Command::new(rclone())
                 .args(&args)
                 .env("RCLONE_CONFIG", scratch.join("rclone.conf"))

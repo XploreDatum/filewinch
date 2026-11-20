@@ -1,4 +1,8 @@
 //! Idle timeouts: a stalled server fails fast, a slow-but-steady one never times out.
+//!
+//! A stalled server holds the connection for a minute, so a failure well before that can only
+//! be the 1 s idle timeout (bounds leave a wide margin for a loaded runner). A steady one sends
+//! every 100 ms, a tenth of the idle timeout, so scheduler hiccups can't look like a stall.
 
 mod common;
 
@@ -10,6 +14,16 @@ use common::{read_request, reader, serve};
 use filewinch_core::ErrorKind;
 use filewinch_http::Http;
 
+/// How long a stalled server holds the connection.
+const STALL: Duration = Duration::from_secs(60);
+/// The steady server's gap between bytes, and how many it sends (3 s in all).
+const GAP: Duration = Duration::from_millis(100);
+const STEPS: u8 = 30;
+
+fn steady_byte(i: u8) -> u8 {
+    b'a' + i % 26
+}
+
 fn short() -> Http {
     Http::with_timeouts(Duration::from_secs(2), Duration::from_secs(1))
 }
@@ -20,7 +34,7 @@ fn stall_after_headers_is_network_error_within_idle_time() {
         let mut r = reader(&stream);
         if read_request(&mut r).is_ok() {
             let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n0123456789");
-            std::thread::sleep(Duration::from_secs(6));
+            std::thread::sleep(STALL);
         }
     });
     let resp = short()
@@ -38,7 +52,7 @@ fn stall_after_headers_is_network_error_within_idle_time() {
     let err = filewinch_core::Error::from(err);
     assert_eq!(err.kind, ErrorKind::Network, "{err}");
     assert!(
-        elapsed >= Duration::from_millis(800) && elapsed < Duration::from_secs(3),
+        elapsed >= Duration::from_millis(800) && elapsed < STALL / 2,
         "{elapsed:?}"
     );
 }
@@ -48,7 +62,7 @@ fn stall_before_headers_is_network_error_within_idle_time() {
     let port = serve(|stream: TcpStream| {
         let mut r = reader(&stream);
         if read_request(&mut r).is_ok() {
-            std::thread::sleep(Duration::from_secs(6));
+            std::thread::sleep(STALL);
         }
     });
     let http = short();
@@ -65,7 +79,7 @@ fn stall_before_headers_is_network_error_within_idle_time() {
         err.message.contains("127.0.0.1") && err.message.contains("timed out"),
         "{err}"
     );
-    assert!(elapsed < Duration::from_secs(3), "{elapsed:?}");
+    assert!(elapsed < STALL / 2, "{elapsed:?}");
 }
 
 #[test]
@@ -73,11 +87,11 @@ fn slow_but_steady_body_succeeds_past_idle_timeout() {
     let port = serve(|mut stream: TcpStream| {
         let mut r = reader(&stream);
         if read_request(&mut r).is_ok() {
-            let _ = stream
-                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\nConnection: close\r\n\r\n");
-            for i in 0..10u8 {
-                std::thread::sleep(Duration::from_millis(300));
-                let _ = stream.write_all(&[b'0' + i]);
+            let head = format!("HTTP/1.1 200 OK\r\nContent-Length: {STEPS}\r\nConnection: close\r\n\r\n");
+            let _ = stream.write_all(head.as_bytes());
+            for i in 0..STEPS {
+                std::thread::sleep(GAP);
+                let _ = stream.write_all(&[steady_byte(i)]);
             }
         }
     });
@@ -92,9 +106,10 @@ fn slow_but_steady_body_succeeds_past_idle_timeout() {
         .into_reader()
         .read_to_string(&mut body)
         .unwrap();
-    assert_eq!(body, "0123456789");
+    let want: String = (0..STEPS).map(|i| steady_byte(i) as char).collect();
+    assert_eq!(body, want);
     assert!(
-        started.elapsed() >= Duration::from_secs(3),
+        started.elapsed() >= GAP * STEPS as u32,
         "the body took 3 s in total"
     );
 }
@@ -108,15 +123,15 @@ fn slow_but_steady_upload_succeeds_past_idle_timeout() {
             common::respond(&mut stream, "200 OK", "", &body);
         }
     });
-    // A body source that dribbles 10 bytes over 3 s: total time > idle, gaps < idle.
+    // A body source that dribbles 30 bytes over 3 s: total time > idle, gaps < idle.
     struct Dribble(u8);
     impl Read for Dribble {
         fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-            if self.0 == 10 || buf.is_empty() {
+            if self.0 == STEPS || buf.is_empty() {
                 return Ok(0);
             }
-            std::thread::sleep(Duration::from_millis(300));
-            buf[0] = b'a' + self.0;
+            std::thread::sleep(GAP);
+            buf[0] = steady_byte(self.0);
             self.0 += 1;
             Ok(1)
         }
@@ -124,8 +139,9 @@ fn slow_but_steady_upload_succeeds_past_idle_timeout() {
     let http = short();
     let url = format!("http://127.0.0.1:{port}/up");
     let mut resp =
-        filewinch_http::send_reader(http.agent().put(&url), Dribble(0), Some(10)).unwrap();
-    assert_eq!(resp.body_mut().read_to_string().unwrap(), "abcdefghij");
+        filewinch_http::send_reader(http.agent().put(&url), Dribble(0), Some(STEPS as u64)).unwrap();
+    let want: String = (0..STEPS).map(|i| steady_byte(i) as char).collect();
+    assert_eq!(resp.body_mut().read_to_string().unwrap(), want);
 }
 
 #[test]

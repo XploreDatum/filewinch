@@ -347,9 +347,9 @@ fn with_cloud() -> (Ui, Arc<dyn Remote>) {
     (ui, remote)
 }
 
-/// Waits (up to 10 s) for the engine to make `done` true.
+/// Waits (up to 30 s) for the engine to make `done` true.
 fn eventually(mut done: impl FnMut() -> bool) -> bool {
-    let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(30);
     while std::time::Instant::now() < end {
         if done() {
             return true;

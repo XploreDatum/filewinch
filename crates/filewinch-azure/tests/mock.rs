@@ -180,7 +180,18 @@ fn closing_stops_a_pending_copy_and_aborts_it() {
     let r: Arc<dyn filewinch_core::Remote> = Arc::from(connect(&site(mock.port, "acct"), DEV_KEY).unwrap());
     let r2 = r.clone();
     let t = std::thread::spawn(move || r2.copy(&p("/box/a"), &p("/box/b")));
-    std::thread::sleep(Duration::from_millis(700));
+    // Close once the copy is pending: its PUT answered (so the copy id is known) and the first
+    // status poll made after it, rather than after a guessed 700 ms.
+    let end = std::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let seen = mock.seen();
+        let started = seen.iter().position(|s| s.method == "PUT" && !s.has_query("comp=copy"));
+        if started.is_some_and(|i| seen.len() > i + 1) {
+            break;
+        }
+        assert!(std::time::Instant::now() < end, "the copy never started polling: {seen:?}");
+        std::thread::sleep(Duration::from_millis(10));
+    }
     r.close();
     let e = t.join().unwrap().unwrap_err();
     assert_eq!(e.kind, ErrorKind::Closed, "{e}");

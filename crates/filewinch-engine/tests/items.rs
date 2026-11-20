@@ -28,9 +28,9 @@ fn dst() -> Arc<Mem> {
     d
 }
 
-/// Polls until `f` holds (or panics after 10 s).
+/// Polls until `f` holds (or panics after 30 s).
 fn eventually(what: &str, mut f: impl FnMut() -> bool) {
-    let end = Instant::now() + Duration::from_secs(10);
+    let end = Instant::now() + Duration::from_secs(30);
     while !f() {
         assert!(Instant::now() < end, "timed out waiting for {what}");
         std::thread::sleep(Duration::from_millis(5));

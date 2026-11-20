@@ -48,7 +48,8 @@ fn connects_and_rejects_wrong_password_and_missing_login() {
     assert!(err.message.contains("no saved password"), "{err}");
 
     let mut nowhere = s.clone();
-    nowhere.port = Some(filewinch_testkit::free_port());
+    let port = filewinch_testkit::refused_port();
+    nowhere.port = Some(port);
     assert_eq!(connect_with(&nowhere, "x").err().unwrap().kind, ErrorKind::Network);
 }
 
@@ -187,8 +188,10 @@ fn dropped_connection_mid_download_is_a_network_error() {
     std::fs::write(srv.root.join("f.bin"), noise(3, 4 * 1024 * 1024)).unwrap();
     let proxy = FaultProxy::start(srv.addr);
     let r = connect_rclone(&srv, proxy.port);
-    let mut reader = r.read(&RPath::new("/f.bin"), 0).unwrap();
+    // Armed before the request: the proxy forwards nothing past the budget (the request is a
+    // few hundred bytes of it), so the body can't all slip into socket buffers before the cut.
     proxy.cut_after(512 * 1024);
+    let mut reader = r.read(&RPath::new("/f.bin"), 0).unwrap();
     let mut out = Vec::new();
     let err = reader.read_to_end(&mut out).expect_err("a cut connection must not look like EOF");
     let err = filewinch_http::from_io(err);

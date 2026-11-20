@@ -223,7 +223,8 @@ fn file_operations() {
 
 /// Waits for rclone's VFS to write a closed file back to its root.
 fn wait_for_file(p: &Path, len: usize) -> Vec<u8> {
-    for _ in 0..100 {
+    let end = std::time::Instant::now() + Duration::from_secs(30);
+    while std::time::Instant::now() < end {
         if let Ok(b) = std::fs::read(p)
             && b.len() == len {
                 return b;
@@ -414,7 +415,7 @@ fn download_resumes_after_connection_drop() {
 
 #[test]
 fn unreachable_server_is_a_network_error() {
-    let port = filewinch_testkit::free_port();
+    let port = filewinch_testkit::refused_port();
     let err = connect_raw(&site(port, "x", pw_auth()), Some("p".into())).err().unwrap();
     assert_eq!(err.kind, ErrorKind::Network);
     assert!(err.message.contains("refused the connection"), "{}", err.message);

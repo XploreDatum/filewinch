@@ -422,10 +422,13 @@ fn cancel_mid_transfer_aborts_the_sink() {
     let mut h = Harness::new(cfg());
     let id = h.engine.enqueue(copy(&ra, &["/big"], &rb, "/", ConflictPolicy::Ask));
     h.until(Duration::from_secs(10), |e| matches!(e, Event::Progress(_, p) if p.bytes_done > 20_000)).unwrap();
-    let t = Instant::now();
     h.engine.cancel(id);
+    // Cancel takes effect at the next chunk: at most the one 4 KiB read already under way lands,
+    // however slowly the runner goes (a byte count, not a time budget).
+    let at_cancel = b.get("/big").unwrap().len();
     assert!(matches!(h.wait(id), JobState::Cancelled));
-    assert!(t.elapsed() < Duration::from_secs(1), "cancel took {:?}", t.elapsed());
+    let landed = b.get("/big").unwrap().len() - at_cancel;
+    assert!(landed <= 4096, "{landed} bytes landed after the cancel");
     assert_eq!(b.aborted_sinks.load(Ordering::SeqCst), 1);
     assert!(b.get("/big").unwrap().len() < 2_000_000);
     assert!(h.failures(id).is_empty(), "cancel isn't a failure");
