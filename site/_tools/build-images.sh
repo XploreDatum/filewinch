@@ -16,9 +16,16 @@ crop() {  # crop <os> <name> -> <os>-<name>.webp: the sheet in the middle of the
   cwebp -quiet -q 80 -m 6 "$out/.tmp.png" -o "$out/$1-$2.webp"
   rm -f "$out/.tmp.png"
 }
+crop_tall() {  # crop_tall <os> <name> -> <os>-<name>.webp: a sheet too tall for crop (Connect, with
+  # Saved Servers): the same centre and 10:9 frame, 1800x1620, scaled to 1400x1260 like the rest
+  magick "$shots/$1/$2.png" -crop 1800x1620+420+10 +repage -resize 1400x1260 -strip "$out/.tmp.png"
+  cwebp -quiet -q 80 -m 6 "$out/.tmp.png" -o "$out/$1-$2.webp"
+  rm -f "$out/.tmp.png"
+}
 for n in transfers transfers-dark remote remote-dark; do shot macos "$n"; done
 for n in sync sync-dark delete-shared-everyone delete-shared-everyone-dark \
-         trust trust-dark connect-sftp connect-sftp-dark; do crop macos "$n"; done
+         trust trust-dark; do crop macos "$n"; done
+for n in connect-sftp connect-sftp-dark; do crop_tall macos "$n"; done
 for os in windows linux; do shot "$os" remote; shot "$os" remote-dark; done
 # Icons: brand SVG and PNG sizes, plus favicon.ico
 cp "$repo/assets/icon/icon-small.svg" "$icons/favicon.svg"
