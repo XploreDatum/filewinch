@@ -58,8 +58,11 @@ pub(crate) fn map_transport(e: ureq::Error, host: &str, rejection: Option<Reject
             }
             use io::ErrorKind as K;
             let detail = scrub(&io.to_string());
-            // std reports getaddrinfo failures as an uncategorized io error.
-            if detail.contains("failed to lookup address") {
+            // std reports getaddrinfo failures as an uncategorized io error: by text on Unix,
+            // and on Windows by Winsock code (WSAHOST_NOT_FOUND, WSATRY_AGAIN, WSANO_RECOVERY,
+            // WSANO_DATA: "No such host is known.").
+            let windows_dns = cfg!(windows) && matches!(io.raw_os_error(), Some(11001..=11004));
+            if windows_dns || detail.contains("failed to lookup address") {
                 return net(not_found_message(host)).with_detail(detail);
             }
             let message = match io.kind() {

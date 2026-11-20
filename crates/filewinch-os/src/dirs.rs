@@ -65,7 +65,11 @@ impl Dirs {
                 }
             }
             Os::Linux => {
-                let xdg = |k: &str, fallback: &str| set(k).filter(|p| p.is_absolute()).unwrap_or_else(|| home.join(fallback));
+                // XDG: a relative value is ignored. "Absolute" means a leading `/` (not the host's
+                // `Path::is_absolute`, which on Windows wants a drive letter).
+                let xdg = |k: &str, fallback: &str| {
+                    set(k).filter(|p| p.to_string_lossy().starts_with('/')).unwrap_or_else(|| home.join(fallback))
+                };
                 Dirs { config: xdg("XDG_CONFIG_HOME", ".config").join("filewinch"), cache: xdg("XDG_CACHE_HOME", ".cache").join("filewinch"), home }
             }
         })
